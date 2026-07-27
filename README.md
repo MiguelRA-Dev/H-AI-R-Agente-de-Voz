@@ -27,6 +27,8 @@ La API key de Gemini vive solo en `server/` (`.env`), nunca en el código del na
 
 - [Node.js](https://nodejs.org) 18+
 - Una API key gratuita de Gemini: [Google AI Studio](https://aistudio.google.com) → sección de API keys
+- Una API key de Cartersia para voz natural [https://play.cartesia.ai/subscription]
+- Una Key de Cluster MongoDB para subir las respuestas pertinentes [https://cloud.mongodb.com/]
 - Chrome o Edge de escritorio (mejor soporte de reconocimiento de voz; Firefox no lo soporta, Safari es limitado)
 
 ## Instalación
