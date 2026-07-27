@@ -1,0 +1,47 @@
+.voice-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  width: fit-content;
+  margin: 0 auto 32px;
+  padding: 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+.voice-icon-btn {
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.15s ease, border-color 0.25s ease, background 0.25s ease, color 0.25s ease;
+}
+.voice-icon-btn:hover:not(:disabled) { transform: scale(1.05); }
+.voice-icon-btn:active:not(:disabled) { transform: scale(0.95); }
+.voice-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.voice-icon-btn.mic {
+  width: 60px;
+  height: 60px;
+}
+.voice-icon-btn.mic.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #062b26;
+}
+
+.voice-icon-btn.close {
+  width: 48px;
+  height: 48px;
+  background: transparent;
+  color: var(--text-muted);
+}
+.voice-icon-btn.close:hover:not(:disabled) { color: var(--text); }

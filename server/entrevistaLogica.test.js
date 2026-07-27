@@ -1,0 +1,103 @@
+import { describe, test, expect } from "@jest/globals";
+import {
+  MARGEN_TURNOS_EXTRA,
+  UMBRAL_APROBACION,
+  debeForzarCierre,
+  esUltimaPreguntaPlaneada,
+  construirMensajeConNota,
+  extraerCierre,
+  calcularAprobado,
+} from "./entrevistaLogica.js";
+
+describe("debeForzarCierre", () => {
+  const total = 10;
+
+  test("no fuerza el cierre mientras quedan preguntas planeadas", () => {
+    expect(debeForzarCierre(1, total)).toBe(false);
+    expect(debeForzarCierre(total, total)).toBe(false);
+  });
+
+  test("no fuerza el cierre dentro del margen de seguridad", () => {
+    expect(debeForzarCierre(total + MARGEN_TURNOS_EXTRA, total)).toBe(false);
+  });
+
+  test("fuerza el cierre justo al pasar el margen de seguridad", () => {
+    expect(debeForzarCierre(total + MARGEN_TURNOS_EXTRA + 1, total)).toBe(true);
+  });
+
+  test("respeta un margen custom si se pasa explícito", () => {
+    expect(debeForzarCierre(total + 1, total, 0)).toBe(true);
+    expect(debeForzarCierre(total, total, 0)).toBe(false);
+  });
+});
+
+describe("esUltimaPreguntaPlaneada / construirMensajeConNota", () => {
+  const total = 5;
+
+  test("no agrega nota antes de la última pregunta", () => {
+    expect(esUltimaPreguntaPlaneada(total - 1, total)).toBe(false);
+    expect(construirMensajeConNota("hola", total - 1, total)).toBe("hola");
+  });
+
+  test("agrega la nota interna justo en la última pregunta planeada", () => {
+    expect(esUltimaPreguntaPlaneada(total, total)).toBe(true);
+    const mensaje = construirMensajeConNota("mi respuesta", total, total);
+    expect(mensaje).toContain("mi respuesta");
+    expect(mensaje).toContain("Nota interna");
+    expect(mensaje).toContain("cierra la entrevista ahora mismo");
+  });
+
+  test("sigue agregando la nota si ya se pasó de la última pregunta (reintentos)", () => {
+    expect(construirMensajeConNota("otra", total + 1, total)).toContain("Nota interna");
+  });
+});
+
+describe("extraerCierre", () => {
+  const MARCA = "[FIN_DE_PRUEBA]";
+
+  test("no marca finalizada si el texto no trae la marca", () => {
+    const resultado = extraerCierre("Cuéntame más sobre tu experiencia.", MARCA);
+    expect(resultado).toEqual({ texto: "Cuéntame más sobre tu experiencia.", finalizada: false });
+  });
+
+  test("detecta la marca, la quita del texto y recorta espacios", () => {
+    const resultado = extraerCierre(`Gracias por tu tiempo.  ${MARCA}`, MARCA);
+    expect(resultado.finalizada).toBe(true);
+    expect(resultado.texto).toBe("Gracias por tu tiempo.");
+    expect(resultado.texto).not.toContain(MARCA);
+  });
+
+  test("funciona si la marca aparece en medio del texto", () => {
+    const resultado = extraerCierre(`Antes ${MARCA} después`, MARCA);
+    expect(resultado.finalizada).toBe(true);
+    expect(resultado.texto).toBe("Antes  después");
+  });
+});
+
+describe("calcularAprobado", () => {
+  test("usa el umbral fijo de 70 por defecto", () => {
+    expect(UMBRAL_APROBACION).toBe(70);
+  });
+
+  test("aprueba justo en el umbral y por encima", () => {
+    expect(calcularAprobado(70)).toBe(true);
+    expect(calcularAprobado(100)).toBe(true);
+  });
+
+  test("no aprueba justo debajo del umbral ni en 0", () => {
+    expect(calcularAprobado(69)).toBe(false);
+    expect(calcularAprobado(0)).toBe(false);
+  });
+
+  test("mismo puntaje da el mismo resultado sin importar cuántas veces se llame", () => {
+    // La garantía central del fix: el criterio no depende de qué tan generoso
+    // haya estado Gemini en una evaluación puntual, siempre es el mismo umbral.
+    expect(calcularAprobado(55)).toBe(calcularAprobado(55));
+    expect(calcularAprobado(55)).toBe(false);
+  });
+
+  test("respeta un umbral custom si se pasa explícito", () => {
+    expect(calcularAprobado(60, 60)).toBe(true);
+    expect(calcularAprobado(59, 60)).toBe(false);
+  });
+});
