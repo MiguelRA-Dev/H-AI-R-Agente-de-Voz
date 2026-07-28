@@ -9,7 +9,15 @@ import {
   crearChatEntrevista,
   evaluarEntrevista,
 } from "./gemini.js";
-import { guardarEntrevista, obtenerVacantesPublicadas, obtenerVacantePorId } from "./db.js";
+import {
+  guardarEntrevista,
+  obtenerVacantesPublicadas,
+  obtenerVacantePorId,
+  guardarSesion,
+  obtenerSesion,
+  eliminarSesion,
+  asegurarIndiceSesiones,
+} from "./db.js";
 import { debeForzarCierre, construirMensajeConNota, extraerCierre } from "./entrevistaLogica.js";
 import { ttsDisponible, sintetizarVoz } from "./tts.js";
 
@@ -49,7 +57,12 @@ app.use(express.json());
 // React ya compilada. En desarrollo Vite corre aparte y le hace proxy a /api.
 app.use(express.static(path.join(__dirname, "../client/dist")));
 
-// Sesiones activas en memoria: sessionId -> { vacante, vacanteId, chat, plan, mensajes, turnos, finalizada }
+// Caché en memoria de sesiones activas — evita ir a Mongo en cada turno.
+// La fuente de verdad es la colección "sesiones_activas" (ver db.js): si el
+// servidor se reinicia a mitad de una entrevista, este Map queda vacío pero
+// la sesión sigue en Mongo, y `obtenerSesionActiva` la reconstruye sola en
+// la siguiente petición (rehidratación perezosa).
+// sessionId -> { vacante, vacanteId, vacanteInfo, chat, plan, mensajes, turnos, finalizada, avisoPrivacidadAceptadoEn }
 const sessions = new Map();
 
 const MENSAJE_ARRANQUE =
@@ -57,6 +70,51 @@ const MENSAJE_ARRANQUE =
 
 const MENSAJE_CIERRE_FORZADO =
   "Gracias por tu tiempo y por tus respuestas. Con esto damos por terminada la entrevista.";
+
+// El objeto "chat" del SDK de Gemini no es serializable: esto es lo único
+// que realmente se guarda en Mongo en cada turno.
+function sesionPersistible(session) {
+  const { chat, ...resto } = session;
+  return resto;
+}
+
+// Reconstruye el historial en el formato que espera `chats.create()`:
+// alternando 'user'/'model' y empezando en 'user'. MENSAJE_ARRANQUE fue el
+// primer turno real (nunca se guarda en `mensajes`, solo la apertura que
+// generó), así que hay que anteponerlo para que la reconstrucción sea fiel.
+function construirHistorialGemini(mensajes) {
+  return [
+    { role: "user", parts: [{ text: MENSAJE_ARRANQUE }] },
+    ...mensajes.map((m) => ({
+      role: m.role === "ai" ? "model" : "user",
+      parts: [{ text: m.text }],
+    })),
+  ];
+}
+
+// Devuelve la sesión activa: primero del caché en memoria, y si no está
+// (típicamente porque el servidor se reinició) la recupera de Mongo y
+// reconstruye el chat de Gemini con su historial real antes de devolverla.
+async function obtenerSesionActiva(sessionId) {
+  if (sessions.has(sessionId)) return sessions.get(sessionId);
+
+  const guardada = await obtenerSesion(sessionId);
+  if (!guardada) return null;
+
+  const chat = crearChatEntrevista(
+    guardada.vacanteInfo,
+    guardada.plan,
+    construirHistorialGemini(guardada.mensajes)
+  );
+
+  const session = { ...guardada, chat };
+  delete session._id;
+  delete session.actualizadoEn;
+
+  sessions.set(sessionId, session);
+  console.log(`↻ Sesión ${sessionId} reconstruida desde Mongo (el servidor se reinició).`);
+  return session;
+}
 
 // Lista las vacantes que RRHH dejó publicadas en su dashboard, para que el
 // candidato elija una en vez de escribir el puesto a mano.
@@ -80,6 +138,14 @@ app.post("/api/session", async (req, res) => {
   if (!vacanteId) {
     return res.status(400).json({ error: "Falta seleccionar una vacante." });
   }
+  // Exigido también del lado del servidor (no solo deshabilitando el botón en
+  // el cliente): sin esto no hay consentimiento válido para tratar cédula,
+  // celular y la grabación de la entrevista (Ley 1581 de 2012, Colombia).
+  if (req.body?.aceptaAvisoPrivacidad !== true) {
+    return res
+      .status(400)
+      .json({ error: "Debes aceptar el aviso de tratamiento de datos personales para continuar." });
+  }
 
   try {
     const vacante = await obtenerVacantePorId(vacanteId);
@@ -92,15 +158,19 @@ app.post("/api/session", async (req, res) => {
     const apertura = await chat.sendMessage({ message: MENSAJE_ARRANQUE });
 
     const sessionId = randomUUID();
-    sessions.set(sessionId, {
+    const session = {
       vacante: vacante.titulo,
       vacanteId: vacante.id,
+      vacanteInfo: vacante,
       chat,
       plan,
       mensajes: [{ role: "ai", text: apertura.text }],
       turnos: 0,
       finalizada: false,
-    });
+      avisoPrivacidadAceptadoEn: new Date(),
+    };
+    sessions.set(sessionId, session);
+    await guardarSesion(sessionId, sesionPersistible(session));
 
     res.json({
       sessionId,
@@ -125,7 +195,15 @@ app.post("/api/message", async (req, res) => {
     return res.status(400).json({ error: "Mensaje vacío." });
   }
 
-  const session = sessions.get(sessionId);
+  let session;
+  try {
+    session = await obtenerSesionActiva(sessionId);
+  } catch (err) {
+    console.error("Error recuperando la sesión:", err);
+    return res
+      .status(500)
+      .json({ error: "No se pudo recuperar la sesión. Revisa la consola del servidor." });
+  }
   if (!session) {
     return res.status(404).json({ error: "Sesión no encontrada. Inicia una nueva entrevista." });
   }
@@ -152,7 +230,10 @@ app.post("/api/message", async (req, res) => {
       finalizada: true,
       progreso: { actual: session.turnos, total: session.plan.totalPreguntas },
     });
-    finalizarYGuardar(session).catch((err) =>
+    guardarSesion(sessionId, sesionPersistible(session)).catch((err) =>
+      console.error("Error guardando la sesión en Mongo:", err)
+    );
+    finalizarYGuardar(sessionId, session).catch((err) =>
       console.error("Error evaluando/guardando la entrevista:", err)
     );
     return;
@@ -178,8 +259,12 @@ app.post("/api/message", async (req, res) => {
       progreso: { actual: session.turnos, total: session.plan.totalPreguntas },
     });
 
+    guardarSesion(sessionId, sesionPersistible(session)).catch((err) =>
+      console.error("Error guardando la sesión en Mongo:", err)
+    );
+
     if (finalizada) {
-      finalizarYGuardar(session).catch((err) =>
+      finalizarYGuardar(sessionId, session).catch((err) =>
         console.error("Error evaluando/guardando la entrevista:", err)
       );
     }
@@ -214,7 +299,9 @@ app.post("/api/tts", async (req, res) => {
 
 // Evalúa la entrevista completa y la guarda en MongoDB. Corre en segundo plano
 // (no bloquea la respuesta al candidato) para que el cierre se sienta inmediato.
-async function finalizarYGuardar(session) {
+// Al terminar, limpia la sesión en curso (caché y Mongo): ya quedó capturada
+// para siempre en "entrevistas", no hace falta seguir guardándola aparte.
+async function finalizarYGuardar(sessionId, session) {
   const evaluacion = await evaluarEntrevista(session.vacante, session.mensajes);
   const id = await guardarEntrevista({
     vacante: session.vacante,
@@ -222,6 +309,7 @@ async function finalizarYGuardar(session) {
     candidato: evaluacion.nombreCandidato,
     cedula: evaluacion.cedulaCandidato,
     celular: evaluacion.celularCandidato,
+    avisoPrivacidadAceptadoEn: session.avisoPrivacidadAceptadoEn,
     transcripcion: session.mensajes,
     aprobado: evaluacion.aprobado,
     puntaje: evaluacion.puntaje,
@@ -230,9 +318,19 @@ async function finalizarYGuardar(session) {
     areasDeMejora: evaluacion.areasDeMejora,
   });
   console.log(`✅ Entrevista guardada en MongoDB (id: ${id}) — aprobado: ${evaluacion.aprobado}`);
+
+  sessions.delete(sessionId);
+  eliminarSesion(sessionId).catch((err) =>
+    console.error("Error borrando la sesión ya finalizada:", err)
+  );
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`✅ Servidor corriendo en http://localhost:${PORT}`);
-});
+
+asegurarIndiceSesiones()
+  .catch((err) => console.error("⚠️  No se pudo crear el índice TTL de sesiones:", err))
+  .finally(() => {
+    app.listen(PORT, () => {
+      console.log(`✅ Servidor corriendo en http://localhost:${PORT}`);
+    });
+  });

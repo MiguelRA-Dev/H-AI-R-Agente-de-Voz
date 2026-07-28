@@ -70,3 +70,50 @@ export async function obtenerVacantePorId(id) {
   const { _id, ...resto } = vacante;
   return { id: _id.toString(), ...resto };
 }
+
+// Sesiones de entrevista en curso: se guardan en Mongo (todo excepto el
+// objeto "chat" del SDK de Gemini, que no es serializable) para que un
+// reinicio del servidor no le borre el progreso a un candidato a mitad de
+// la entrevista. Usa el propio sessionId como _id.
+
+const SESION_TTL_SEGUNDOS = 60 * 60 * 24; // 24h sin actividad = sesión abandonada
+
+// Crea (si no existe) el índice TTL que limpia sola las sesiones
+// abandonadas. Segura de llamar en cada arranque del servidor.
+export async function asegurarIndiceSesiones() {
+  const client = await getClient();
+  const db = client.db("agente_voz");
+  await db
+    .collection("sesiones_activas")
+    .createIndex({ actualizadoEn: 1 }, { expireAfterSeconds: SESION_TTL_SEGUNDOS });
+}
+
+// Guarda o actualiza el estado de una entrevista en curso.
+export async function guardarSesion(sessionId, datos) {
+  const client = await getClient();
+  const db = client.db("agente_voz");
+  await db
+    .collection("sesiones_activas")
+    .updateOne(
+      { _id: sessionId },
+      { $set: { ...datos, actualizadoEn: new Date() } },
+      { upsert: true }
+    );
+}
+
+// Recupera una sesión guardada, para reconstruir el chat de Gemini tras un
+// reinicio. Devuelve null si no existe (nunca existió, ya terminó y se
+// limpió, o expiró por abandono).
+export async function obtenerSesion(sessionId) {
+  const client = await getClient();
+  const db = client.db("agente_voz");
+  return db.collection("sesiones_activas").findOne({ _id: sessionId });
+}
+
+// Borra la sesión en curso una vez que la entrevista terminó y ya quedó
+// guardada en "entrevistas" — evita que la colección crezca sin límite.
+export async function eliminarSesion(sessionId) {
+  const client = await getClient();
+  const db = client.db("agente_voz");
+  await db.collection("sesiones_activas").deleteOne({ _id: sessionId });
+}

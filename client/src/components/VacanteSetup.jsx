@@ -23,6 +23,8 @@ export default function VacanteSetup({ onStart, starting, error }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
+  const [aceptaAviso, setAceptaAviso] = useState(false);
+  const [mostrarAviso, setMostrarAviso] = useState(false);
 
   useEffect(() => {
     let cancelado = false;
@@ -48,8 +50,8 @@ export default function VacanteSetup({ onStart, starting, error }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!selectedId || starting) return;
-    onStart(selectedId);
+    if (!selectedId || !aceptaAviso || starting) return;
+    onStart(selectedId, aceptaAviso);
   };
 
   // Clic en la ya seleccionada = deseleccionarla (se contrae de vuelta).
@@ -132,9 +134,47 @@ export default function VacanteSetup({ onStart, starting, error }) {
             </div>
           )}
 
+          <div className="privacy-notice">
+            <div className="privacy-row">
+              <label className="privacy-checkbox">
+                <input
+                  type="checkbox"
+                  checked={aceptaAviso}
+                  onChange={(e) => setAceptaAviso(e.target.checked)}
+                />
+                <span>
+                  He leído y acepto el tratamiento de mis datos personales para este proceso de
+                  selección.
+                </span>
+              </label>
+              <button
+                type="button"
+                className="privacy-link"
+                onClick={() => setMostrarAviso((v) => !v)}
+              >
+                {mostrarAviso ? "Ocultar aviso" : "Ver aviso completo"}
+              </button>
+            </div>
+
+            <div className={`privacy-details${mostrarAviso ? " open" : ""}`}>
+              <p>
+                Para esta entrevista, un agente de inteligencia artificial te va a pedir tu nombre
+                completo, número de cédula y celular, y va a grabar, transcribir y evaluar tus
+                respuestas. Estos datos se comparten únicamente con la empresa que publicó la
+                vacante, con el fin de evaluar tu postulación y poder contactarte. De acuerdo con
+                la Ley 1581 de 2012 (Colombia), puedes solicitar en cualquier momento conocer,
+                actualizar, rectificar o eliminar tus datos contactando directamente a la empresa.
+              </p>
+            </div>
+          </div>
+
           {error && <div className="setup-error">{error}</div>}
 
-          <button type="submit" className="primary" disabled={starting || !selectedId}>
+          <button
+            type="submit"
+            className="primary"
+            disabled={starting || !selectedId || !aceptaAviso}
+          >
             {starting ? "Preparando la entrevista…" : "Comenzar entrevista"}
           </button>
         </form>

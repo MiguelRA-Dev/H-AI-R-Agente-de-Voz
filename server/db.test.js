@@ -5,11 +5,17 @@ const findOneMock = jest.fn();
 const toArrayMock = jest.fn();
 const sortMock = jest.fn(() => ({ toArray: toArrayMock }));
 const findMock = jest.fn(() => ({ sort: sortMock }));
+const updateOneMock = jest.fn();
+const deleteOneMock = jest.fn();
+const createIndexMock = jest.fn();
 const connectMock = jest.fn();
 const collectionMock = jest.fn(() => ({
   insertOne: insertOneMock,
   find: findMock,
   findOne: findOneMock,
+  updateOne: updateOneMock,
+  deleteOne: deleteOneMock,
+  createIndex: createIndexMock,
 }));
 const dbMock = jest.fn(() => ({ collection: collectionMock }));
 
@@ -37,6 +43,10 @@ jest.unstable_mockModule("mongodb", () => ({
 let guardarEntrevista;
 let obtenerVacantesPublicadas;
 let obtenerVacantePorId;
+let guardarSesion;
+let obtenerSesion;
+let eliminarSesion;
+let asegurarIndiceSesiones;
 
 beforeEach(async () => {
   jest.resetModules();
@@ -47,11 +57,22 @@ beforeEach(async () => {
   toArrayMock.mockReset();
   sortMock.mockClear();
   findMock.mockClear();
+  updateOneMock.mockReset();
+  deleteOneMock.mockReset();
+  createIndexMock.mockReset();
   connectMock.mockReset().mockResolvedValue({ db: dbMock });
   dbMock.mockClear();
   collectionMock.mockClear();
 
-  ({ guardarEntrevista, obtenerVacantesPublicadas, obtenerVacantePorId } = await import("./db.js"));
+  ({
+    guardarEntrevista,
+    obtenerVacantesPublicadas,
+    obtenerVacantePorId,
+    guardarSesion,
+    obtenerSesion,
+    eliminarSesion,
+    asegurarIndiceSesiones,
+  } = await import("./db.js"));
 });
 
 describe("guardarEntrevista", () => {
@@ -152,5 +173,58 @@ describe("obtenerVacantePorId", () => {
       titulo: "Ingeniero de Sistemas",
       requisitos: "2 años de experiencia",
     });
+  });
+});
+
+describe("guardarSesion", () => {
+  test("hace upsert en 'sesiones_activas' usando el sessionId como _id", async () => {
+    await guardarSesion("sesion-1", { turnos: 2 });
+
+    expect(dbMock).toHaveBeenCalledWith("agente_voz");
+    expect(collectionMock).toHaveBeenCalledWith("sesiones_activas");
+    expect(updateOneMock).toHaveBeenCalledWith(
+      { _id: "sesion-1" },
+      { $set: expect.objectContaining({ turnos: 2, actualizadoEn: expect.any(Date) }) },
+      { upsert: true }
+    );
+  });
+});
+
+describe("obtenerSesion", () => {
+  test("busca por _id en 'sesiones_activas'", async () => {
+    findOneMock.mockResolvedValue({ _id: "sesion-1", turnos: 3 });
+
+    const sesion = await obtenerSesion("sesion-1");
+
+    expect(collectionMock).toHaveBeenCalledWith("sesiones_activas");
+    expect(findOneMock).toHaveBeenCalledWith({ _id: "sesion-1" });
+    expect(sesion).toEqual({ _id: "sesion-1", turnos: 3 });
+  });
+
+  test("devuelve null si no existe (nunca existió, terminó, o expiró por TTL)", async () => {
+    findOneMock.mockResolvedValue(null);
+    const sesion = await obtenerSesion("no-existe");
+    expect(sesion).toBeNull();
+  });
+});
+
+describe("eliminarSesion", () => {
+  test("borra por _id en 'sesiones_activas'", async () => {
+    await eliminarSesion("sesion-1");
+
+    expect(collectionMock).toHaveBeenCalledWith("sesiones_activas");
+    expect(deleteOneMock).toHaveBeenCalledWith({ _id: "sesion-1" });
+  });
+});
+
+describe("asegurarIndiceSesiones", () => {
+  test("crea el índice TTL sobre 'actualizadoEn'", async () => {
+    await asegurarIndiceSesiones();
+
+    expect(collectionMock).toHaveBeenCalledWith("sesiones_activas");
+    expect(createIndexMock).toHaveBeenCalledWith(
+      { actualizadoEn: 1 },
+      { expireAfterSeconds: expect.any(Number) }
+    );
   });
 });

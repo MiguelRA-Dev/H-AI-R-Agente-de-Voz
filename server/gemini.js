@@ -177,7 +177,11 @@ function construirInstruccionSistema(vacante, plan) {
   );
 }
 
-export function crearChatEntrevista(vacante, plan) {
+// `history` (opcional) reconstruye una entrevista ya en curso —tras un
+// reinicio del servidor— a partir de los mensajes guardados en Mongo, en vez
+// de arrancar una conversación nueva. Debe alternar roles 'user'/'model' y
+// empezar en 'user' (lo arma `construirHistorialGemini` en server.js).
+export function crearChatEntrevista(vacante, plan, history = []) {
   const ai = getAI();
 
   return ai.chats.create({
@@ -191,6 +195,7 @@ export function crearChatEntrevista(vacante, plan) {
       maxOutputTokens: 220,
       thinkingConfig: { thinkingLevel: "MINIMAL" },
     },
+    history,
   });
 }
 

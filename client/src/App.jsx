@@ -35,14 +35,14 @@ export default function App() {
   const { theme, toggleTheme } = useTheme();
 
   const handleStart = useCallback(
-    async (vacanteId) => {
+    async (vacanteId, aceptaAvisoPrivacidad) => {
       setStarting(true);
       setSetupError(null);
       try {
         const res = await fetch("/api/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ vacanteId }),
+          body: JSON.stringify({ vacanteId, aceptaAvisoPrivacidad }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "No se pudo iniciar la entrevista.");
