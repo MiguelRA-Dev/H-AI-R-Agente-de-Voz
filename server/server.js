@@ -9,7 +9,7 @@ import {
   crearChatEntrevista,
   evaluarEntrevista,
 } from "./gemini.js";
-import { guardarEntrevista } from "./db.js";
+import { guardarEntrevista, obtenerVacantesPublicadas, obtenerVacantePorId } from "./db.js";
 import { debeForzarCierre, construirMensajeConNota, extraerCierre } from "./entrevistaLogica.js";
 import { ttsDisponible, sintetizarVoz } from "./tts.js";
 
@@ -30,10 +30,11 @@ if (!process.env.GEMINI_API_KEY) {
   process.exit(1);
 }
 if (!process.env.MONGODB_URI) {
-  console.warn(
-    "⚠️  Falta MONGODB_URI en server/.env — la entrevista va a funcionar igual, pero los " +
-      "resultados no se van a poder guardar."
+  console.error(
+    "❌ Falta MONGODB_URI. Sin esto no se pueden cargar las vacantes publicadas por RRHH ni " +
+      "guardar los resultados de la entrevista."
   );
+  process.exit(1);
 }
 if (!ttsDisponible()) {
   console.warn(
@@ -48,7 +49,7 @@ app.use(express.json());
 // React ya compilada. En desarrollo Vite corre aparte y le hace proxy a /api.
 app.use(express.static(path.join(__dirname, "../client/dist")));
 
-// Sesiones activas en memoria: sessionId -> { vacante, chat, plan, mensajes, turnos, finalizada }
+// Sesiones activas en memoria: sessionId -> { vacante, vacanteId, chat, plan, mensajes, turnos, finalizada }
 const sessions = new Map();
 
 const MENSAJE_ARRANQUE =
@@ -57,22 +58,43 @@ const MENSAJE_ARRANQUE =
 const MENSAJE_CIERRE_FORZADO =
   "Gracias por tu tiempo y por tus respuestas. Con esto damos por terminada la entrevista.";
 
-// Crea la sesión: genera el plan de preguntas para la vacante, arma el chat con el
-// entrevistador ya perfilado, y hace que la IA abra la conversación ella misma.
+// Lista las vacantes que RRHH dejó publicadas en su dashboard, para que el
+// candidato elija una en vez de escribir el puesto a mano.
+app.get("/api/vacantes", async (req, res) => {
+  try {
+    const vacantes = await obtenerVacantesPublicadas();
+    res.json({ vacantes });
+  } catch (err) {
+    console.error("Error obteniendo las vacantes publicadas:", err);
+    res
+      .status(500)
+      .json({ error: "No se pudieron cargar las vacantes. Revisa la consola del servidor." });
+  }
+});
+
+// Crea la sesión: busca la vacante elegida, genera el plan de preguntas a partir
+// de su descripción/requisitos reales, arma el chat con el entrevistador ya
+// perfilado, y hace que la IA abra la conversación ella misma.
 app.post("/api/session", async (req, res) => {
-  const vacante = (req.body?.vacante || "").trim();
-  if (!vacante) {
-    return res.status(400).json({ error: "Falta indicar la vacante." });
+  const vacanteId = (req.body?.vacanteId || "").trim();
+  if (!vacanteId) {
+    return res.status(400).json({ error: "Falta seleccionar una vacante." });
   }
 
   try {
+    const vacante = await obtenerVacantePorId(vacanteId);
+    if (!vacante) {
+      return res.status(404).json({ error: "La vacante seleccionada ya no está disponible." });
+    }
+
     const plan = await generarPlanEntrevista(vacante);
     const chat = crearChatEntrevista(vacante, plan);
     const apertura = await chat.sendMessage({ message: MENSAJE_ARRANQUE });
 
     const sessionId = randomUUID();
     sessions.set(sessionId, {
-      vacante,
+      vacante: vacante.titulo,
+      vacanteId: vacante.id,
       chat,
       plan,
       mensajes: [{ role: "ai", text: apertura.text }],
@@ -83,7 +105,7 @@ app.post("/api/session", async (req, res) => {
     res.json({
       sessionId,
       openingText: apertura.text,
-      vacante,
+      vacante: vacante.titulo,
       totalPreguntas: plan.totalPreguntas,
     });
   } catch (err) {
@@ -196,7 +218,10 @@ async function finalizarYGuardar(session) {
   const evaluacion = await evaluarEntrevista(session.vacante, session.mensajes);
   const id = await guardarEntrevista({
     vacante: session.vacante,
+    vacanteId: session.vacanteId,
     candidato: evaluacion.nombreCandidato,
+    cedula: evaluacion.cedulaCandidato,
+    celular: evaluacion.celularCandidato,
     transcripcion: session.mensajes,
     aprobado: evaluacion.aprobado,
     puntaje: evaluacion.puntaje,

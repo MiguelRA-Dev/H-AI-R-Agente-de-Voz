@@ -75,12 +75,17 @@ Abre **http://localhost:3000**.
   API key y sigue usando `ai.chats.create()` con `systemInstruction` para que
   el rol se mantenga durante toda la conversación.
 
-## Personalizar el rol del agente
+## De dónde salen las vacantes
 
-Edita `client/src/constants.js` (objeto `PRESETS`). Cada rol es solo un
-`label` (lo que se ve en el selector) y un `text` (lo que se envía como
-`systemInstruction`). Agregar uno nuevo es agregar una entrada ahí — el
-selector y el envío a Gemini se arman solos a partir de ese objeto.
+Las vacantes no se escriben a mano: se leen de la colección `vacantes` en
+Mongo (`agente_voz.vacantes`), la misma base que usa el dashboard de RRHH del
+otro microservicio para publicarlas. `GET /api/vacantes` solo trae las que
+tienen `estado: "abierta"`; al elegir una, `POST /api/session` recupera el
+documento completo (`titulo`, `descripcion`, `requisitos`, `ubicacion`,
+`modalidad`, etc.) y con eso arma el plan de preguntas y el `systemInstruction`
+del entrevistador (ver `generarPlanEntrevista`/`crearChatEntrevista` en
+`server/gemini.js`). Si esa colección está vacía, el selector del cliente
+simplemente no muestra vacantes.
 
 ## Notas y próximos pasos
 

@@ -4,8 +4,10 @@ import Orb from "./components/Orb";
 import ProgressBar from "./components/ProgressBar";
 import VoiceBar from "./components/VoiceBar";
 import CornerMarks from "./components/CornerMarks";
+import ThemeToggle from "./components/ThemeToggle";
 import { useSpeechRecognition } from "./hooks/useSpeechRecognition";
 import { useSpeechSynthesis } from "./hooks/useSpeechSynthesis";
+import { useTheme } from "./hooks/useTheme";
 import { SPEECH_LANG } from "./constants";
 
 // Estados sin caption propia (idle) caen al mensaje por defecto: conversación
@@ -30,22 +32,23 @@ export default function App() {
     lang: SPEECH_LANG,
   });
   const { speak, cancel } = useSpeechSynthesis({ lang: SPEECH_LANG });
+  const { theme, toggleTheme } = useTheme();
 
   const handleStart = useCallback(
-    async (vacanteValue) => {
+    async (vacanteId) => {
       setStarting(true);
       setSetupError(null);
       try {
         const res = await fetch("/api/session", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ vacante: vacanteValue }),
+          body: JSON.stringify({ vacanteId }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "No se pudo iniciar la entrevista.");
 
         setSessionId(data.sessionId);
-        setVacante(vacanteValue);
+        setVacante(data.vacante);
         setProgreso({ actual: 0, total: data.totalPreguntas || 0 });
         setPhase("interview");
         setAppState("speaking");
@@ -121,6 +124,7 @@ export default function App() {
     return (
       <>
         <CornerMarks />
+        <ThemeToggle theme={theme} onToggle={toggleTheme} />
         <VacanteSetup onStart={handleStart} starting={starting} error={setupError} />
       </>
     );
@@ -138,6 +142,7 @@ export default function App() {
 
   return (
     <div className="voice-page">
+      <ThemeToggle theme={theme} onToggle={toggleTheme} />
       <header className="voice-topbar">
         <span className={`voice-status-dot ${appState === "done" ? "off" : ""}`} />
         <span className="voice-status-label">

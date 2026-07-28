@@ -1,4 +1,5 @@
-:root {
+:root,
+:root[data-theme="dark"] {
   --bg: #0a0a0b;
   --surface: #131315;
   --surface-2: #1a1a1d;
@@ -7,9 +8,32 @@
   --text-muted: #8a8a90;
   --text-dim: #55555a;
   --accent: #5eead4;
-  --danger: #e15a5a;
+  --danger-bg: rgba(225, 90, 90, 0.12);
+  --danger-border: rgba(225, 90, 90, 0.35);
+  --danger-text: #f3b8b8;
+  --shadow-soft: rgba(0, 0, 0, 0.45);
+  --selection-glow: rgba(255, 255, 255, 0.18);
+  --mono: #ffffff;
+  --mono-contrast: #0a0a0b;
   --font-display: "Space Grotesk", sans-serif;
   --font-body: "Inter", sans-serif;
+}
+
+:root[data-theme="light"] {
+  --bg: #f4f4f5;
+  --surface: #ffffff;
+  --surface-2: #f1f1f3;
+  --border: #e2e2e6;
+  --text: #17171a;
+  --text-muted: #6b6b71;
+  --text-dim: #9a9aa1;
+  --danger-bg: rgba(209, 60, 60, 0.08);
+  --danger-border: rgba(209, 60, 60, 0.3);
+  --danger-text: #b3273f;
+  --shadow-soft: rgba(20, 20, 30, 0.12);
+  --selection-glow: rgba(0, 0, 0, 0.14);
+  --mono: #000000;
+  --mono-contrast: #ffffff;
 }
 
 * {
@@ -25,6 +49,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-family: var(--font-body);
+  transition: background 0.2s ease, color 0.2s ease;
 }
 
 #root {
@@ -51,19 +76,6 @@ body {
   text-align: center;
 }
 
-.setup-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  margin: 0 auto 18px;
-}
-
 .setup-card h1 {
   font-family: var(--font-display);
   font-size: 24px;
@@ -72,10 +84,8 @@ body {
   letter-spacing: -0.01em;
 }
 
-.setup-card > p {
-  margin: 0 0 26px;
-  color: var(--text-muted);
-  font-size: 14px;
+.vacante-heading {
+  margin-bottom: 24px;
 }
 
 .setup-card form {
@@ -83,63 +93,228 @@ body {
 }
 
 .setup-error {
-  background: rgba(225, 90, 90, 0.12);
-  border: 1px solid rgba(225, 90, 90, 0.35);
-  color: #f3b8b8;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text);
   border-radius: 10px;
   padding: 10px 14px;
   font-size: 13px;
   margin-bottom: 14px;
 }
 
-/* ---------- Elementos de formulario compartidos ---------- */
+/* ---------- Selector de vacantes publicadas ---------- */
 
-label {
-  display: block;
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--text-muted);
-  margin-bottom: 8px;
+.setup-card--vacantes {
+  max-width: 560px;
 }
 
-input[type="text"] {
+.vacante-status {
+  margin: 0 0 18px;
+  color: var(--text-muted);
+  font-size: 13.5px;
+  text-align: center;
+}
+
+.vacante-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 380px;
+  overflow-y: auto;
+  margin-bottom: 18px;
+  padding-right: 4px;
+}
+
+.vacante-list::-webkit-scrollbar {
+  width: 6px;
+}
+.vacante-list::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 999px;
+}
+
+.vacante-card {
+  display: block;
   width: 100%;
+  text-align: left;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  color: var(--text);
-  border-radius: 10px;
-  padding: 11px 14px;
+  border-radius: 14px;
+  padding: 14px 16px;
+  cursor: pointer;
   font-family: var(--font-body);
-  font-size: 14.5px;
-  margin-bottom: 18px;
+  color: var(--text);
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
 }
-
-input[type="text"]:focus,
-button:focus-visible {
-  outline: 2px solid var(--accent);
+.vacante-card:hover {
+  border-color: var(--text-dim);
+}
+.vacante-card.selected {
+  border-color: var(--mono);
+  background: var(--surface);
+  box-shadow: 0 0 0 1px var(--selection-glow);
+}
+.vacante-card:focus-visible {
+  outline: 2px solid var(--mono);
   outline-offset: 2px;
 }
 
+.vacante-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.vacante-card-title {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: -0.01em;
+}
+
+.vacante-card-check {
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  color: var(--mono-contrast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.vacante-card.selected .vacante-card-check {
+  background: var(--mono);
+  border-color: var(--mono);
+}
+
+.vacante-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.vacante-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 11.5px;
+  font-weight: 500;
+  text-transform: capitalize;
+}
+
+.vacante-card-contrato {
+  margin: 0 0 8px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+
+.vacante-card-desc-wrap {
+  position: relative;
+  max-height: 400px;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+}
+.vacante-card-desc-wrap.clamped {
+  max-height: 38px;
+}
+.vacante-card-desc-wrap.clamped::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 16px;
+  background: linear-gradient(to bottom, transparent, var(--surface-2));
+}
+
+.vacante-card-desc {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-line;
+}
+
+.vacante-card-requisitos {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  animation: vacante-requisitos-in 0.25s ease;
+}
+
+@keyframes vacante-requisitos-in {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.vacante-card-requisitos-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  margin-bottom: 8px;
+}
+
+.vacante-card-requisitos ul {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.vacante-card-requisitos li {
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+/* ---------- Botón principal (blanco/negro, igual que el dashboard) ---------- */
+
 button.primary {
   width: 100%;
-  background: var(--accent);
-  color: #062b26;
-  border: none;
+  background: var(--mono);
+  color: var(--mono-contrast);
+  border: 1px solid var(--mono);
   border-radius: 10px;
   padding: 13px;
   font-family: var(--font-body);
   font-weight: 600;
   font-size: 14.5px;
   cursor: pointer;
-  transition: filter 0.15s ease;
+  transition: opacity 0.15s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
-button.primary:hover:not(:disabled) { filter: brightness(1.08); }
-button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
+button.primary:hover:not(:disabled) { opacity: 0.85; }
+/* Deshabilitado: "fantasma" (borde, sin relleno) en vez de negro/blanco con
+   opacidad — mezclar negro u blanco con opacidad siempre da gris, sin importar
+   el tema, y eso es justo lo que no queríamos. */
+button.primary:disabled {
+  background: transparent;
+  color: var(--text-dim);
+  border-color: var(--border);
+  cursor: not-allowed;
+}
+button.primary:focus-visible {
+  outline: 2px solid var(--mono);
+  outline-offset: 2px;
+}
 
 .warning {
-  background: rgba(225, 90, 90, 0.12);
-  border: 1px solid rgba(225, 90, 90, 0.35);
-  color: #f3b8b8;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  color: var(--danger-text);
   border-radius: 12px;
   padding: 12px 16px;
   font-size: 13.5px;
@@ -207,6 +382,41 @@ button.primary:disabled { opacity: 0.6; cursor: not-allowed; }
   color: var(--text-muted);
   font-size: 15px;
   line-height: 1.65;
+}
+
+/* ---------- Selector de tema claro/oscuro ---------- */
+
+.theme-toggle {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease, transform 0.15s ease;
+}
+.theme-toggle:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
+}
+.theme-toggle:active {
+  transform: scale(0.94);
+}
+.theme-toggle:focus-visible {
+  outline: 2px solid var(--mono);
+  outline-offset: 2px;
+}
+
+@media (max-width: 560px) {
+  .theme-toggle { top: 14px; right: 14px; }
 }
 
 /* ---------- Marcas de esquina (decorativas) ---------- */
