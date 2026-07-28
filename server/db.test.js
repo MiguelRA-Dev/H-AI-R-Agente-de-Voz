@@ -47,6 +47,8 @@ let guardarSesion;
 let obtenerSesion;
 let eliminarSesion;
 let asegurarIndiceSesiones;
+let registrarUsoTts;
+let obtenerUsoTts;
 
 beforeEach(async () => {
   jest.resetModules();
@@ -72,6 +74,8 @@ beforeEach(async () => {
     obtenerSesion,
     eliminarSesion,
     asegurarIndiceSesiones,
+    registrarUsoTts,
+    obtenerUsoTts,
   } = await import("./db.js"));
 });
 
@@ -226,5 +230,44 @@ describe("asegurarIndiceSesiones", () => {
       { actualizadoEn: 1 },
       { expireAfterSeconds: expect.any(Number) }
     );
+  });
+});
+
+describe("registrarUsoTts", () => {
+  test("suma caracteres y peticiones al documento del mes en curso", async () => {
+    await registrarUsoTts(42);
+
+    expect(dbMock).toHaveBeenCalledWith("agente_voz");
+    expect(collectionMock).toHaveBeenCalledWith("uso_tts");
+    expect(updateOneMock).toHaveBeenCalledWith(
+      { _id: expect.stringMatching(/^\d{4}-\d{2}$/) },
+      {
+        $inc: { caracteres: 42, peticiones: 1 },
+        $set: { actualizadoEn: expect.any(Date) },
+      },
+      { upsert: true }
+    );
+  });
+});
+
+describe("obtenerUsoTts", () => {
+  test("devuelve el consumo del mes en curso", async () => {
+    findOneMock.mockResolvedValue({ caracteres: 1500, peticiones: 12 });
+
+    const uso = await obtenerUsoTts();
+
+    expect(collectionMock).toHaveBeenCalledWith("uso_tts");
+    expect(uso.mes).toMatch(/^\d{4}-\d{2}$/);
+    expect(uso.caracteres).toBe(1500);
+    expect(uso.peticiones).toBe(12);
+  });
+
+  test("devuelve 0 si todavía no se sintetizó nada este mes", async () => {
+    findOneMock.mockResolvedValue(null);
+
+    const uso = await obtenerUsoTts();
+
+    expect(uso.caracteres).toBe(0);
+    expect(uso.peticiones).toBe(0);
   });
 });

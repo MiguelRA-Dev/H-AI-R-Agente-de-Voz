@@ -17,6 +17,8 @@ import {
   obtenerSesion,
   eliminarSesion,
   asegurarIndiceSesiones,
+  registrarUsoTts,
+  obtenerUsoTts,
 } from "./db.js";
 import { debeForzarCierre, construirMensajeConNota, extraerCierre } from "./entrevistaLogica.js";
 import { ttsDisponible, sintetizarVoz } from "./tts.js";
@@ -46,7 +48,7 @@ if (!process.env.MONGODB_URI) {
 }
 if (!ttsDisponible()) {
   console.warn(
-    "⚠️  Falta CARTESIA_API_KEY o CARTESIA_VOICE_ID en server/.env — la voz cae de vuelta al " +
+    "⚠️  Falta AZURE_SPEECH_KEY o AZURE_SPEECH_REGION en server/.env — la voz cae de vuelta al " +
       "TTS del navegador."
   );
 }
@@ -62,7 +64,7 @@ app.use(express.static(path.join(__dirname, "../client/dist")));
 // servidor se reinicia a mitad de una entrevista, este Map queda vacío pero
 // la sesión sigue en Mongo, y `obtenerSesionActiva` la reconstruye sola en
 // la siguiente petición (rehidratación perezosa).
-// sessionId -> { vacante, vacanteId, vacanteInfo, chat, plan, mensajes, turnos, finalizada, avisoPrivacidadAceptadoEn }
+// sessionId -> { vacante, vacanteId, vacanteInfo, cedula, celular, chat, plan, mensajes, turnos, finalizada, avisoPrivacidadAceptadoEn }
 const sessions = new Map();
 
 const MENSAJE_ARRANQUE =
@@ -135,8 +137,16 @@ app.get("/api/vacantes", async (req, res) => {
 // perfilado, y hace que la IA abra la conversación ella misma.
 app.post("/api/session", async (req, res) => {
   const vacanteId = (req.body?.vacanteId || "").trim();
+  const cedula = (req.body?.cedula || "").trim();
+  const celular = (req.body?.celular || "").trim();
   if (!vacanteId) {
     return res.status(400).json({ error: "Falta seleccionar una vacante." });
+  }
+  // Cédula y celular se piden acá, escritos a mano, en vez de que la IA los pida
+  // por voz: son datos donde un error de transcripción pesa mucho más que en
+  // una respuesta de texto libre.
+  if (!cedula || !celular) {
+    return res.status(400).json({ error: "Falta la cédula o el número de celular." });
   }
   // Exigido también del lado del servidor (no solo deshabilitando el botón en
   // el cliente): sin esto no hay consentimiento válido para tratar cédula,
@@ -162,6 +172,8 @@ app.post("/api/session", async (req, res) => {
       vacante: vacante.titulo,
       vacanteId: vacante.id,
       vacanteInfo: vacante,
+      cedula,
+      celular,
       chat,
       plan,
       mensajes: [{ role: "ai", text: apertura.text }],
@@ -277,23 +289,45 @@ app.post("/api/message", async (req, res) => {
 });
 
 // Convierte el texto del entrevistador a voz natural. El cliente cae de vuelta
-// al TTS del navegador si esto falla o si no hay credenciales de Cartesia.
+// al TTS del navegador si esto falla o si no hay credenciales de Azure Speech.
 app.post("/api/tts", async (req, res) => {
   const { text } = req.body || {};
   if (!text || !text.trim()) {
     return res.status(400).json({ error: "Falta el texto a sintetizar." });
   }
   if (!ttsDisponible()) {
-    return res.status(503).json({ error: "TTS de Cartesia no está configurado." });
+    return res.status(503).json({ error: "TTS de Azure Speech no está configurado." });
   }
 
   try {
     const { audio, contentType } = await sintetizarVoz(text);
     res.set("Content-Type", contentType);
     res.send(audio);
+    registrarUsoTts(text.length).catch((err) =>
+      console.error("Error registrando el uso de TTS:", err)
+    );
   } catch (err) {
-    console.error("Error generando audio con Cartesia:", err);
+    console.error("Error generando audio con Azure Speech:", err);
     res.status(500).json({ error: "No se pudo generar el audio." });
+  }
+});
+
+// Consumo del mes en curso contra el tier gratuito F0 de Azure Speech
+// (500.000 caracteres/mes). El portal de Azure no siempre muestra este
+// dato (depende del tipo de suscripción), así que lo llevamos aparte.
+const LIMITE_TTS_MENSUAL = 500000;
+
+app.get("/api/tts/uso", async (req, res) => {
+  try {
+    const uso = await obtenerUsoTts();
+    res.json({
+      ...uso,
+      limiteMensual: LIMITE_TTS_MENSUAL,
+      porcentaje: Math.round((uso.caracteres / LIMITE_TTS_MENSUAL) * 1000) / 10,
+    });
+  } catch (err) {
+    console.error("Error obteniendo el uso de TTS:", err);
+    res.status(500).json({ error: "No se pudo obtener el uso de TTS." });
   }
 });
 
@@ -307,8 +341,8 @@ async function finalizarYGuardar(sessionId, session) {
     vacante: session.vacante,
     vacanteId: session.vacanteId,
     candidato: evaluacion.nombreCandidato,
-    cedula: evaluacion.cedulaCandidato,
-    celular: evaluacion.celularCandidato,
+    cedula: session.cedula,
+    celular: session.celular,
     avisoPrivacidadAceptadoEn: session.avisoPrivacidadAceptadoEn,
     transcripcion: session.mensajes,
     aprobado: evaluacion.aprobado,

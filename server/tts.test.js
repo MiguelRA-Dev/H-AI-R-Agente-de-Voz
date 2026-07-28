@@ -10,56 +10,66 @@ afterEach(() => {
 });
 
 describe("ttsDisponible", () => {
-  test("false si falta la API key o el voice id", () => {
-    delete process.env.CARTESIA_API_KEY;
-    delete process.env.CARTESIA_VOICE_ID;
+  test("false si falta la API key o la región", () => {
+    delete process.env.AZURE_SPEECH_KEY;
+    delete process.env.AZURE_SPEECH_REGION;
     expect(ttsDisponible()).toBe(false);
 
-    process.env.CARTESIA_API_KEY = "sk_car_test";
-    delete process.env.CARTESIA_VOICE_ID;
+    process.env.AZURE_SPEECH_KEY = "clave-de-prueba";
+    delete process.env.AZURE_SPEECH_REGION;
     expect(ttsDisponible()).toBe(false);
   });
 
   test("true si ambas variables están presentes", () => {
-    process.env.CARTESIA_API_KEY = "sk_car_test";
-    process.env.CARTESIA_VOICE_ID = "voice-de-prueba";
+    process.env.AZURE_SPEECH_KEY = "clave-de-prueba";
+    process.env.AZURE_SPEECH_REGION = "eastus";
     expect(ttsDisponible()).toBe(true);
   });
 });
 
 describe("sintetizarVoz", () => {
   beforeEach(() => {
-    process.env.CARTESIA_API_KEY = "sk_car_test";
-    process.env.CARTESIA_VOICE_ID = "voice-de-prueba";
+    process.env.AZURE_SPEECH_KEY = "clave-de-prueba";
+    process.env.AZURE_SPEECH_REGION = "eastus";
   });
 
-  test("llama al endpoint correcto con los headers y el body esperados", async () => {
+  test("llama al endpoint de la región configurada con los headers y el SSML esperados", async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       arrayBuffer: async () => new Uint8Array([1, 2, 3]).buffer,
-      headers: { get: () => "audio/mpeg" },
     });
 
     await sintetizarVoz("Hola, bienvenido a la entrevista.");
 
     expect(global.fetch).toHaveBeenCalledTimes(1);
     const [url, opciones] = global.fetch.mock.calls[0];
-    expect(url).toBe("https://api.cartesia.ai/tts/bytes");
+    expect(url).toBe("https://eastus.tts.speech.microsoft.com/cognitiveservices/v1");
     expect(opciones.method).toBe("POST");
-    expect(opciones.headers.Authorization).toBe("Bearer sk_car_test");
-    expect(opciones.headers["Cartesia-Version"]).toBeTruthy();
+    expect(opciones.headers["Ocp-Apim-Subscription-Key"]).toBe("clave-de-prueba");
+    expect(opciones.headers["Content-Type"]).toBe("application/ssml+xml");
+    expect(opciones.headers["X-Microsoft-OutputFormat"]).toBeTruthy();
 
-    const body = JSON.parse(opciones.body);
-    expect(body.transcript).toBe("Hola, bienvenido a la entrevista.");
-    expect(body.voice).toEqual({ mode: "id", id: "voice-de-prueba" });
-    expect(body.language).toBe("es");
+    expect(opciones.body).toContain("Hola, bienvenido a la entrevista.");
+    expect(opciones.body).toContain("<speak");
+    expect(opciones.body).toContain("es-CO");
   });
 
-  test("devuelve los bytes de audio y el content-type de la respuesta", async () => {
+  test("escapa caracteres reservados de XML en el texto", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1]).buffer,
+    });
+
+    await sintetizarVoz(`Tom & Jerry's "aventura" <especial>`);
+
+    const [, opciones] = global.fetch.mock.calls[0];
+    expect(opciones.body).toContain("Tom &amp; Jerry&apos;s &quot;aventura&quot; &lt;especial&gt;");
+  });
+
+  test("devuelve los bytes de audio y content-type audio/mpeg", async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: true,
       arrayBuffer: async () => new Uint8Array([9, 9, 9]).buffer,
-      headers: { get: () => "audio/mpeg" },
     });
 
     const resultado = await sintetizarVoz("texto");
@@ -68,7 +78,7 @@ describe("sintetizarVoz", () => {
     expect([...resultado.audio]).toEqual([9, 9, 9]);
   });
 
-  test("lanza un error legible si Cartesia responde con un status de error", async () => {
+  test("lanza un error legible si Azure Speech responde con un status de error", async () => {
     global.fetch = jest.fn().mockResolvedValue({
       ok: false,
       status: 401,

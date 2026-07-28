@@ -117,3 +117,35 @@ export async function eliminarSesion(sessionId) {
   const db = client.db("agente_voz");
   await db.collection("sesiones_activas").deleteOne({ _id: sessionId });
 }
+
+// Monitoreo propio del consumo de Azure Speech (TTS): el portal de Azure no
+// muestra caracteres consumidos para todos los tipos de suscripción (ver
+// error "WebDirect/AIRS"), así que lo llevamos nosotros. Un documento por
+// mes calendario ("2026-07"), así el conteo se reinicia solo cada mes,
+// igual que la cuota gratuita de Azure.
+
+function mesActual() {
+  return new Date().toISOString().slice(0, 7); // "2026-07"
+}
+
+// Suma los caracteres de una síntesis exitosa al contador del mes en curso.
+export async function registrarUsoTts(caracteres) {
+  const client = await getClient();
+  const db = client.db("agente_voz");
+  await db
+    .collection("uso_tts")
+    .updateOne(
+      { _id: mesActual() },
+      { $inc: { caracteres, peticiones: 1 }, $set: { actualizadoEn: new Date() } },
+      { upsert: true }
+    );
+}
+
+// Consumo del mes en curso (0 si todavía no se sintetizó nada este mes).
+export async function obtenerUsoTts() {
+  const client = await getClient();
+  const db = client.db("agente_voz");
+  const mes = mesActual();
+  const doc = await db.collection("uso_tts").findOne({ _id: mes });
+  return { mes, caracteres: doc?.caracteres || 0, peticiones: doc?.peticiones || 0 };
+}

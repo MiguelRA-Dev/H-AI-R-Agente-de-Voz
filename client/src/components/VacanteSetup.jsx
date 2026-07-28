@@ -23,6 +23,8 @@ export default function VacanteSetup({ onStart, starting, error }) {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
+  const [cedula, setCedula] = useState("");
+  const [celular, setCelular] = useState("");
   const [aceptaAviso, setAceptaAviso] = useState(false);
   const [mostrarAviso, setMostrarAviso] = useState(false);
 
@@ -48,10 +50,13 @@ export default function VacanteSetup({ onStart, starting, error }) {
     };
   }, []);
 
+  const cedulaValida = cedula.trim().length > 0;
+  const celularValido = celular.trim().length > 0;
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!selectedId || !aceptaAviso || starting) return;
-    onStart(selectedId, aceptaAviso);
+    if (!selectedId || !cedulaValida || !celularValido || !aceptaAviso || starting) return;
+    onStart(selectedId, aceptaAviso, cedula.trim(), celular.trim());
   };
 
   // Clic en la ya seleccionada = deseleccionarla (se contrae de vuelta).
@@ -134,6 +139,33 @@ export default function VacanteSetup({ onStart, starting, error }) {
             </div>
           )}
 
+          <div className="contacto-fields">
+            <div className="contacto-field">
+              <label htmlFor="cedula">Cédula</label>
+              <input
+                id="cedula"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]+"
+                placeholder="Ej: 1032456789"
+                value={cedula}
+                onChange={(e) => setCedula(e.target.value)}
+              />
+            </div>
+            <div className="contacto-field">
+              <label htmlFor="celular">Celular</label>
+              <input
+                id="celular"
+                type="tel"
+                inputMode="numeric"
+                pattern="[0-9]+"
+                placeholder="Ej: 3001234567"
+                value={celular}
+                onChange={(e) => setCelular(e.target.value)}
+              />
+            </div>
+          </div>
+
           <div className="privacy-notice">
             <div className="privacy-row">
               <label className="privacy-checkbox">
@@ -158,12 +190,13 @@ export default function VacanteSetup({ onStart, starting, error }) {
 
             <div className={`privacy-details${mostrarAviso ? " open" : ""}`}>
               <p>
-                Para esta entrevista, un agente de inteligencia artificial te va a pedir tu nombre
-                completo, número de cédula y celular, y va a grabar, transcribir y evaluar tus
-                respuestas. Estos datos se comparten únicamente con la empresa que publicó la
-                vacante, con el fin de evaluar tu postulación y poder contactarte. De acuerdo con
-                la Ley 1581 de 2012 (Colombia), puedes solicitar en cualquier momento conocer,
-                actualizar, rectificar o eliminar tus datos contactando directamente a la empresa.
+                Para esta entrevista, vas a dejar tu cédula y celular en este formulario, y un
+                agente de inteligencia artificial te va a pedir tu nombre completo y va a grabar,
+                transcribir y evaluar tus respuestas. Estos datos se comparten únicamente con la
+                empresa que publicó la vacante, con el fin de evaluar tu postulación y poder
+                contactarte. De acuerdo con la Ley 1581 de 2012 (Colombia), puedes solicitar en
+                cualquier momento conocer, actualizar, rectificar o eliminar tus datos contactando
+                directamente a la empresa.
               </p>
             </div>
           </div>
@@ -173,7 +206,7 @@ export default function VacanteSetup({ onStart, starting, error }) {
           <button
             type="submit"
             className="primary"
-            disabled={starting || !selectedId || !aceptaAviso}
+            disabled={starting || !selectedId || !cedulaValida || !celularValido || !aceptaAviso}
           >
             {starting ? "Preparando la entrevista…" : "Comenzar entrevista"}
           </button>

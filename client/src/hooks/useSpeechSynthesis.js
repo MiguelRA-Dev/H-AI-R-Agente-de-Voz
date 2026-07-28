@@ -10,10 +10,10 @@ function hablarConNavegador(text, lang, onEnd) {
 }
 
 /**
- * Síntesis de voz (TTS) natural vía Cartesia, generada en el servidor para no
- * exponer la API key. Si el servidor no tiene Cartesia configurado o la
- * llamada falla, cae de vuelta a la voz nativa del navegador para que la
- * entrevista nunca se quede muda.
+ * Síntesis de voz (TTS) natural vía Azure AI Speech, generada en el servidor
+ * para no exponer la API key. Si el servidor no tiene Azure Speech
+ * configurado o la llamada falla, cae de vuelta a la voz nativa del
+ * navegador para que la entrevista nunca se quede muda.
  */
 export function useSpeechSynthesis({ lang }) {
   const reproduccionRef = useRef(null);

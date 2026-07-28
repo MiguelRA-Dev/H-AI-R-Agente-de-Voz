@@ -18,15 +18,14 @@ const ESTILO_VOZ =
 
 // Pregunta 0: siempre va primero, antes que el plan generado por Gemini, para que
 // la entrevista arranque conociendo a la persona y no se sienta solo un examen técnico.
-// También recoge los datos de contacto (cédula y celular) que RRHH necesita para poder
-// contactar al candidato después, no solo su nombre.
+// Cédula y celular ya no se piden acá: se capturan en un formulario antes de empezar
+// (ver VacanteSetup.jsx), porque son datos donde un error de transcripción por voz
+// pesa mucho más que en una respuesta de texto libre.
 export const PREGUNTA_INTRO = {
   tema: "Presentación personal",
   pregunta:
-    "Antes de entrar en materia, pídele su nombre completo, su número de cédula y un número " +
-    "de celular donde la empresa pueda contactarlo (pídele que lo diga despacio, número por " +
-    "número). Luego pídele que se presente brevemente: quién es, su trayectoria y qué lo trae " +
-    "a postularse a esta vacante.",
+    "Antes de entrar en materia, pídele su nombre completo y pídele que se presente " +
+    "brevemente: quién es, su trayectoria y qué lo trae a postularse a esta vacante.",
 };
 
 const PLAN_SCHEMA = {
@@ -70,28 +69,8 @@ const EVALUACION_SCHEMA = {
       items: { type: "STRING" },
     },
     nombreCandidato: { type: "STRING" },
-    cedulaCandidato: {
-      type: "STRING",
-      description:
-        "Número de cédula o documento de identidad que el candidato dio durante la entrevista, " +
-        "tal cual lo dijo. Cadena vacía si nunca lo dio.",
-    },
-    celularCandidato: {
-      type: "STRING",
-      description:
-        "Número de celular que el candidato dio durante la entrevista, para que la empresa " +
-        "pueda contactarlo. Cadena vacía si nunca lo dio.",
-    },
   },
-  required: [
-    "puntaje",
-    "resumen",
-    "fortalezas",
-    "areasDeMejora",
-    "nombreCandidato",
-    "cedulaCandidato",
-    "celularCandidato",
-  ],
+  required: ["puntaje", "resumen", "fortalezas", "areasDeMejora", "nombreCandidato"],
 };
 
 // Recorta el plan que devuelve Gemini a máximo 20 preguntas técnicas y le
@@ -145,15 +124,6 @@ function construirInstruccionSistema(vacante, plan) {
     "conocer a la persona y hacer que se sienta en una conversación humana, no en un examen. " +
     "A partir de la pregunta 2 entra en materia con el perfil técnico y de competencias.";
 
-  const instruccionConfirmacionDatos =
-    "La cédula y el celular que dé el candidato en la pregunta 1 vienen de una transcripción " +
-    "automática de voz, así que pueden tener errores. Antes de pasar a la pregunta 2, en la " +
-    "misma respuesta donde agradeces la presentación, repite en voz alta dígito por dígito la " +
-    "cédula y el celular que entendiste y pregunta si están correctos. Si el candidato corrige " +
-    "algún número, confírmalo de nuevo brevemente antes de seguir. Solo continúa con la " +
-    "pregunta 2 cuando el candidato haya confirmado que ambos datos están bien. No repitas este " +
-    "paso de confirmación para ninguna otra pregunta.";
-
   const instruccionCierre =
     `Haz estas ${plan.totalPreguntas} preguntas una por una, en el orden dado, sin saltarte ` +
     "ninguna y sin agregar preguntas extra. En cuanto el candidato responda la última " +
@@ -168,8 +138,6 @@ function construirInstruccionSistema(vacante, plan) {
     listaPreguntas +
     "\n\n" +
     instruccionTono +
-    "\n\n" +
-    instruccionConfirmacionDatos +
     "\n\n" +
     instruccionCierre +
     "\n\n" +

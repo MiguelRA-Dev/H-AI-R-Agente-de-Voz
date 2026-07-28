@@ -353,6 +353,44 @@ body {
   line-height: 1.55;
 }
 
+/* ---------- Datos de contacto (cédula/celular, manuales) ---------- */
+
+.contacto-fields {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.contacto-field {
+  flex: 1;
+  min-width: 140px;
+}
+
+.contacto-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  margin-bottom: 6px;
+}
+
+.contacto-field input {
+  width: 100%;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-family: var(--font-body);
+  font-size: 14px;
+}
+
+.contacto-field input:focus-visible {
+  outline: 2px solid var(--mono);
+  outline-offset: 2px;
+}
+
 /* ---------- Botón principal (blanco/negro, igual que el dashboard) ---------- */
 
 button.primary {

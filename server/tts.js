@@ -1,35 +1,48 @@
-const CARTESIA_TTS_URL = "https://api.cartesia.ai/tts/bytes";
-const CARTESIA_VERSION = "2026-03-01";
-const MODELO_VOZ = "sonic-3.5";
+const VOZ = "es-CO-GonzaloNeural"; // voz neural en español de Colombia
+const IDIOMA = "es-CO";
+const FORMATO_AUDIO = "audio-24khz-160kbitrate-mono-mp3";
 
 export function ttsDisponible() {
-  return Boolean(process.env.CARTESIA_API_KEY && process.env.CARTESIA_VOICE_ID);
+  return Boolean(process.env.AZURE_SPEECH_KEY && process.env.AZURE_SPEECH_REGION);
 }
 
-// Convierte texto a voz natural vía Cartesia. Devuelve los bytes de audio en
-// mp3 y el content-type que hay que reenviarle al navegador.
+// SSML es XML: escapa los caracteres reservados para que un nombre o texto
+// con "&", comillas, etc. no rompa el documento que le mandamos a Azure.
+function escaparSsml(texto) {
+  return texto
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
+}
+
+// Convierte texto a voz natural vía Azure AI Speech (tier gratuito F0).
+// Devuelve los bytes de audio en mp3 y el content-type que hay que
+// reenviarle al navegador.
 export async function sintetizarVoz(texto) {
-  const respuesta = await fetch(CARTESIA_TTS_URL, {
+  const url = `https://${process.env.AZURE_SPEECH_REGION}.tts.speech.microsoft.com/cognitiveservices/v1`;
+  const ssml =
+    `<speak version="1.0" xml:lang="${IDIOMA}">` +
+    `<voice xml:lang="${IDIOMA}" name="${VOZ}">${escaparSsml(texto)}</voice>` +
+    `</speak>`;
+
+  const respuesta = await fetch(url, {
     method: "POST",
     headers: {
-      "Cartesia-Version": CARTESIA_VERSION,
-      Authorization: `Bearer ${process.env.CARTESIA_API_KEY}`,
-      "Content-Type": "application/json",
+      "Ocp-Apim-Subscription-Key": process.env.AZURE_SPEECH_KEY,
+      "Content-Type": "application/ssml+xml",
+      "X-Microsoft-OutputFormat": FORMATO_AUDIO,
+      "User-Agent": "agente-voz-h-air",
     },
-    body: JSON.stringify({
-      model_id: MODELO_VOZ,
-      transcript: texto,
-      voice: { mode: "id", id: process.env.CARTESIA_VOICE_ID },
-      output_format: { container: "mp3", sample_rate: 44100, bit_rate: 128000 },
-      language: "es",
-    }),
+    body: ssml,
   });
 
   if (!respuesta.ok) {
     const detalle = await respuesta.text().catch(() => "");
-    throw new Error(`Cartesia respondió ${respuesta.status}: ${detalle}`);
+    throw new Error(`Azure Speech respondió ${respuesta.status}: ${detalle}`);
   }
 
   const audio = Buffer.from(await respuesta.arrayBuffer());
-  return { audio, contentType: respuesta.headers.get("content-type") || "audio/mpeg" };
+  return { audio, contentType: "audio/mpeg" };
 }
