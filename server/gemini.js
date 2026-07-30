@@ -7,7 +7,7 @@ function getAI() {
   });
 }
 
-export const MODELO = "gemini-3.5-flash";
+export const MODELO = "gemini-3.5-flash-lite";
 
 export const MARCA_FIN = "[ENTREVISTA_FINALIZADA]";
 
