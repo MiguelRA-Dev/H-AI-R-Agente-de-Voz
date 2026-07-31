@@ -1,5 +1,5 @@
 import { GoogleGenAI } from "@google/genai";
-import { calcularAprobado } from "./entrevistaLogica.js";
+import { calcularAprobado, calcularPuntajeGlobal } from "./entrevistaLogica.js";
 
 function getAI() {
   return new GoogleGenAI({
@@ -47,17 +47,51 @@ const PLAN_SCHEMA = {
   required: ["totalPreguntas", "preguntas"],
 };
 
+// Los 4 ejes en los que se descompone la evaluación, cada uno 0-100. El puntaje
+// global que ve RRHH nunca se le pide al modelo: se calcula como el promedio de
+// estos cuatro con calcularPuntajeGlobal() (ver entrevistaLogica.js), para que la
+// evaluación sea explicable (por qué reprobó) y no dependa de qué tan generoso
+// haya estado Gemini puntuando el número global en una entrevista puntual.
 const EVALUACION_SCHEMA = {
   type: "OBJECT",
   properties: {
-    puntaje: {
-      type: "INTEGER",
-      minimum: 0,
-      maximum: 100,
-      description:
-        "Puntaje del candidato en una escala fija de 0 a 100 (nunca de 0 a 10 ni de 0 a 5), " +
-        "evaluando conocimiento técnico relevante para la vacante, claridad de comunicación y " +
-        "calidad/completitud de las respuestas.",
+    competencias: {
+      type: "OBJECT",
+      properties: {
+        conocimientoTecnico: {
+          type: "INTEGER",
+          minimum: 0,
+          maximum: 100,
+          description:
+            "Dominio de los conocimientos técnicos y de dominio específico que pide la vacante " +
+            "(los requisitos reales, no suposiciones genéricas por el título).",
+        },
+        comunicacion: {
+          type: "INTEGER",
+          minimum: 0,
+          maximum: 100,
+          description:
+            "Claridad, estructura y capacidad de explicarse hablando: ¿se le entiende fácil, " +
+            "organiza sus ideas, o divaga/se contradice?",
+        },
+        resolucionProblemas: {
+          type: "INTEGER",
+          minimum: 0,
+          maximum: 100,
+          description:
+            "Razonamiento práctico y analítico: cómo aborda situaciones hipotéticas o problemas " +
+            "planteados, no solo si recita teoría de memoria.",
+        },
+        fitRol: {
+          type: "INTEGER",
+          minimum: 0,
+          maximum: 100,
+          description:
+            "Qué tan alineado está con esta vacante en particular: motivación, expectativas y " +
+            "encaje con la modalidad/seniority del puesto, más allá de lo puramente técnico.",
+        },
+      },
+      required: ["conocimientoTecnico", "comunicacion", "resolucionProblemas", "fitRol"],
     },
     resumen: { type: "STRING" },
     fortalezas: {
@@ -69,8 +103,32 @@ const EVALUACION_SCHEMA = {
       items: { type: "STRING" },
     },
     nombreCandidato: { type: "STRING" },
+    posibleUsoIA: {
+      type: "BOOLEAN",
+      description:
+        "true solo si, revisando toda la transcripción, hay señales concretas de que el " +
+        "candidato leyó respuestas generadas por IA o buscadas en internet en vez de responder " +
+        "con conocimiento propio: respuestas perfectas y genéricas que no se sostienen cuando el " +
+        "entrevistador repregunta por un detalle concreto, o cambios de estilo abruptos entre " +
+        "respuestas. No lo marques true solo porque una respuesta sea buena o esté bien " +
+        "estructurada.",
+    },
+    justificacionUsoIA: {
+      type: "STRING",
+      description:
+        "Si posibleUsoIA es true, explica en 1-2 frases qué te hizo sospechar, citando el tema " +
+        "de la pregunta. Si es false, deja este campo como cadena vacía.",
+    },
   },
-  required: ["puntaje", "resumen", "fortalezas", "areasDeMejora", "nombreCandidato"],
+  required: [
+    "competencias",
+    "resumen",
+    "fortalezas",
+    "areasDeMejora",
+    "nombreCandidato",
+    "posibleUsoIA",
+    "justificacionUsoIA",
+  ],
 };
 
 // Recorta el plan que devuelve Gemini a máximo 20 preguntas técnicas y le
@@ -132,6 +190,17 @@ function construirInstruccionSistema(vacante, plan) {
     `respuesta agregando exactamente la marca ${MARCA_FIN} al final (nunca la menciones ni la ` +
     "expliques al candidato, es solo una señal interna).";
 
+  // Contramedida contra respuestas leídas de Google/otra IA en vez de conocimiento propio:
+  // en vez de aceptarlas de inmediato, se le pide al modelo un detalle concreto y personal
+  // antes de seguir. Solo cuando genera dudas reales, para no interrogar a quien solo fue conciso.
+  const instruccionAntitrampa =
+    "Si una respuesta te suena demasiado genérica o ensayada para ser espontánea —perfecta y " +
+    "bien estructurada pero sin ningún detalle personal, sin dudas ni matices propios del habla, " +
+    "como si viniera de buscarla en internet o pedírsela a otra IA— no la des por buena ni pases " +
+    "a la siguiente pregunta todavía: haz primero una repregunta corta pidiendo un ejemplo " +
+    "concreto y personal (\"cuéntame de una vez específica en la que...\", \"¿y cómo lo " +
+    "resolverías si...\"). Hazlo solo cuando realmente te genere esa duda, no con cada respuesta.";
+
   return (
     `Eres un entrevistador profesional para la vacante "${vacante.titulo}" ` +
     `(${vacante.ubicacion}, modalidad ${vacante.modalidad}).\n\n` +
@@ -140,6 +209,8 @@ function construirInstruccionSistema(vacante, plan) {
     instruccionTono +
     "\n\n" +
     instruccionCierre +
+    "\n\n" +
+    instruccionAntitrampa +
     "\n\n" +
     ESTILO_VOZ
   );
@@ -178,9 +249,17 @@ export async function evaluarEntrevista(vacante, mensajes) {
     `Evalúa esta entrevista de trabajo para la vacante "${vacante}".\n\n` +
     transcripcion +
     "\n\n" +
-    "Usa siempre esta referencia para que el puntaje (0-100) sea consistente entre distintas " +
-    "entrevistas, sin importar qué tan generoso o estricto te sientas hoy: 90-100 candidato " +
-    "excelente, 70-89 buen candidato, 50-69 regular, 0-49 insuficiente para el puesto.";
+    "Usa siempre esta referencia para que cada eje de 'competencias' (0-100) sea consistente " +
+    "entre distintas entrevistas, sin importar qué tan generoso o estricto te sientas hoy: " +
+    "90-100 excelente, 70-89 bueno, 50-69 regular, 0-49 insuficiente para el puesto. Califica " +
+    "cada eje por separado según lo que realmente mostró el candidato en esa dimensión " +
+    "específica, no repitas el mismo número en los cuatro solo porque la impresión general fue " +
+    "buena o mala.\n\n" +
+    "Revisa también si hay señales de que el candidato usó IA/internet para responder en vez de " +
+    "conocimiento propio (ver posibleUsoIA en el esquema): presta especial atención a los tramos " +
+    "donde el entrevistador repreguntó pidiendo un ejemplo concreto y personal, y evalúa si la " +
+    "respuesta a esa repregunta sí aterrizó en algo específico o si el candidato la evadió o dio " +
+    "otra respuesta igual de genérica.";
 
   const response = await ai.models.generateContent({
     model: MODELO,
@@ -193,6 +272,7 @@ export async function evaluarEntrevista(vacante, mensajes) {
   });
 
   const evaluacion = JSON.parse(response.text);
+  evaluacion.puntaje = calcularPuntajeGlobal(evaluacion.competencias);
   evaluacion.aprobado = calcularAprobado(evaluacion.puntaje);
 
   return evaluacion;

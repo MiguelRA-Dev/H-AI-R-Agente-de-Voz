@@ -7,6 +7,8 @@ import {
   construirMensajeConNota,
   extraerCierre,
   calcularAprobado,
+  construirAlertas,
+  calcularPuntajeGlobal,
 } from "./entrevistaLogica.js";
 
 describe("debeForzarCierre", () => {
@@ -99,5 +101,60 @@ describe("calcularAprobado", () => {
   test("respeta un umbral custom si se pasa explícito", () => {
     expect(calcularAprobado(60, 60)).toBe(true);
     expect(calcularAprobado(59, 60)).toBe(false);
+  });
+});
+
+describe("construirAlertas", () => {
+  test("arma el objeto con las dos señales cuando ambas están presentes", () => {
+    expect(construirAlertas(3, true, "Repitió lo mismo al repreguntar sobre Docker.")).toEqual({
+      cambiosPantalla: 3,
+      posibleUsoIA: true,
+      justificacionUsoIA: "Repitió lo mismo al repreguntar sobre Docker.",
+    });
+  });
+
+  test("normaliza valores ausentes/undefined a los defaults seguros", () => {
+    expect(construirAlertas(undefined, undefined, undefined)).toEqual({
+      cambiosPantalla: 0,
+      posibleUsoIA: false,
+      justificacionUsoIA: "",
+    });
+  });
+
+  test("nunca devuelve un número negativo o inválido en cambiosPantalla", () => {
+    expect(construirAlertas(NaN, false, "").cambiosPantalla).toBe(0);
+    expect(construirAlertas("no-es-numero", false, "").cambiosPantalla).toBe(0);
+  });
+});
+
+describe("calcularPuntajeGlobal", () => {
+  test("promedia los 4 ejes de competencia y redondea", () => {
+    expect(
+      calcularPuntajeGlobal({
+        conocimientoTecnico: 80,
+        comunicacion: 70,
+        resolucionProblemas: 90,
+        fitRol: 60,
+      })
+    ).toBe(75);
+  });
+
+  test("redondea hacia el entero más cercano", () => {
+    expect(
+      calcularPuntajeGlobal({ conocimientoTecnico: 70, comunicacion: 70, resolucionProblemas: 70, fitRol: 71 })
+    ).toBe(70);
+    expect(
+      calcularPuntajeGlobal({ conocimientoTecnico: 70, comunicacion: 70, resolucionProblemas: 70, fitRol: 72 })
+    ).toBe(71);
+  });
+
+  test("devuelve 0 si no hay competencias", () => {
+    expect(calcularPuntajeGlobal({})).toBe(0);
+    expect(calcularPuntajeGlobal(undefined)).toBe(0);
+  });
+
+  test("mismo objeto de competencias siempre da el mismo puntaje", () => {
+    const competencias = { conocimientoTecnico: 55, comunicacion: 65, resolucionProblemas: 45, fitRol: 75 };
+    expect(calcularPuntajeGlobal(competencias)).toBe(calcularPuntajeGlobal(competencias));
   });
 });

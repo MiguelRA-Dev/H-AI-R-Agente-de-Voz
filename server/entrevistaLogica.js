@@ -41,3 +41,25 @@ export const UMBRAL_APROBACION = 70;
 export function calcularAprobado(puntaje, umbral = UMBRAL_APROBACION) {
   return puntaje >= umbral;
 }
+
+// El puntaje global nunca se le pide al modelo directamente: se calcula acá como el
+// promedio de los 4 ejes de competencia (ver EVALUACION_SCHEMA en gemini.js), para que
+// no pueda quedar inconsistente con ellos (ej. un promedio real de 60 pero un "puntaje"
+// aparte que el modelo puso en 85 por generosidad).
+export function calcularPuntajeGlobal(competencias) {
+  const valores = Object.values(competencias || {}).map((v) => Number(v) || 0);
+  if (valores.length === 0) return 0;
+  const suma = valores.reduce((acc, v) => acc + v, 0);
+  return Math.round(suma / valores.length);
+}
+
+// Junta las dos señales anti-trampa (cambios de pestaña/ventana detectados en el
+// cliente + sospecha de uso de IA detectada por el evaluador) en un solo objeto
+// para guardar en la entrevista. Es solo dato para RRHH: nunca cambia "aprobado".
+export function construirAlertas(cambiosPantalla, posibleUsoIA, justificacionUsoIA) {
+  return {
+    cambiosPantalla: Number(cambiosPantalla) || 0,
+    posibleUsoIA: Boolean(posibleUsoIA),
+    justificacionUsoIA: justificacionUsoIA || "",
+  };
+}

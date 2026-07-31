@@ -8,6 +8,7 @@ import ThemeToggle from "./components/ThemeToggle";
 import { useSpeechRecognition } from "./hooks/useSpeechRecognition";
 import { useSpeechSynthesis } from "./hooks/useSpeechSynthesis";
 import { useTheme } from "./hooks/useTheme";
+import { useTabVisibility } from "./hooks/useTabVisibility";
 import { SPEECH_LANG } from "./constants";
 
 // Estados sin caption propia (idle) caen al mensaje por defecto: conversación
@@ -33,6 +34,9 @@ export default function App() {
   });
   const { speak, cancel } = useSpeechSynthesis({ lang: SPEECH_LANG });
   const { theme, toggleTheme } = useTheme();
+  // Cuenta cambios de pestaña/ventana solo durante la entrevista, en silencio,
+  // como dato para RRHH (ver useTabVisibility).
+  const cambiosPantalla = useTabVisibility(phase === "interview");
 
   const handleStart = useCallback(
     async (vacanteId, aceptaAvisoPrivacidad, cedula, celular) => {
@@ -87,7 +91,7 @@ export default function App() {
         const res = await fetch("/api/message", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sessionId, message: text }),
+          body: JSON.stringify({ sessionId, message: text, cambiosPantalla }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Error del servidor");
@@ -100,7 +104,7 @@ export default function App() {
         setAppState("idle");
       }
     },
-    [sessionId, speak]
+    [sessionId, speak, cambiosPantalla]
   );
 
   const handleMicClick = useCallback(() => {

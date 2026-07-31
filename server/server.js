@@ -20,7 +20,12 @@ import {
   registrarUsoTts,
   obtenerUsoTts,
 } from "./db.js";
-import { debeForzarCierre, construirMensajeConNota, extraerCierre } from "./entrevistaLogica.js";
+import {
+  debeForzarCierre,
+  construirMensajeConNota,
+  extraerCierre,
+  construirAlertas,
+} from "./entrevistaLogica.js";
 import { ttsDisponible, sintetizarVoz } from "./tts.js";
 
 dotenv.config();
@@ -180,6 +185,9 @@ app.post("/api/session", async (req, res) => {
       turnos: 0,
       finalizada: false,
       avisoPrivacidadAceptadoEn: new Date(),
+      // Cuántas veces el cliente detectó que el candidato salió de la pestaña/ventana
+      // (ver useTabVisibility en el cliente). Señal para RRHH, nunca cambia "aprobado".
+      cambiosPantalla: 0,
     };
     sessions.set(sessionId, session);
     await guardarSesion(sessionId, sesionPersistible(session));
@@ -201,7 +209,7 @@ app.post("/api/session", async (req, res) => {
 // Envía la respuesta hablada (ya transcrita) del candidato y devuelve la siguiente
 // pregunta o, si el modelo decidió cerrar, el mensaje de despedida.
 app.post("/api/message", async (req, res) => {
-  const { sessionId, message } = req.body || {};
+  const { sessionId, message, cambiosPantalla } = req.body || {};
 
   if (!message || !message.trim()) {
     return res.status(400).json({ error: "Mensaje vacío." });
@@ -222,6 +230,10 @@ app.post("/api/message", async (req, res) => {
   if (session.finalizada) {
     return res.status(400).json({ error: "Esta entrevista ya finalizó." });
   }
+
+  // El cliente manda el total acumulado en cada turno (no un delta): tomamos el
+  // máximo para no retroceder el conteo si una petición llega desordenada/duplicada.
+  session.cambiosPantalla = Math.max(session.cambiosPantalla || 0, Number(cambiosPantalla) || 0);
 
   // El turno del candidato solo se confirma (mensajes + contador) si el modelo
   // llega a responder con éxito. Así, si Gemini falla (ej. 503 por demanda) y el
@@ -337,6 +349,11 @@ app.get("/api/tts/uso", async (req, res) => {
 // para siempre en "entrevistas", no hace falta seguir guardándola aparte.
 async function finalizarYGuardar(sessionId, session) {
   const evaluacion = await evaluarEntrevista(session.vacante, session.mensajes);
+  const alertas = construirAlertas(
+    session.cambiosPantalla,
+    evaluacion.posibleUsoIA,
+    evaluacion.justificacionUsoIA
+  );
   const id = await guardarEntrevista({
     vacante: session.vacante,
     vacanteId: session.vacanteId,
@@ -347,11 +364,18 @@ async function finalizarYGuardar(sessionId, session) {
     transcripcion: session.mensajes,
     aprobado: evaluacion.aprobado,
     puntaje: evaluacion.puntaje,
+    competencias: evaluacion.competencias,
     resumen: evaluacion.resumen,
     fortalezas: evaluacion.fortalezas,
     areasDeMejora: evaluacion.areasDeMejora,
+    alertas,
   });
-  console.log(`✅ Entrevista guardada en MongoDB (id: ${id}) — aprobado: ${evaluacion.aprobado}`);
+  console.log(
+    `✅ Entrevista guardada en MongoDB (id: ${id}) — aprobado: ${evaluacion.aprobado}` +
+      (alertas.cambiosPantalla > 0 || alertas.posibleUsoIA
+        ? ` — ⚠️ alertas: cambiosPantalla=${alertas.cambiosPantalla}, posibleUsoIA=${alertas.posibleUsoIA}`
+        : "")
+  );
 
   sessions.delete(sessionId);
   eliminarSesion(sessionId).catch((err) =>
