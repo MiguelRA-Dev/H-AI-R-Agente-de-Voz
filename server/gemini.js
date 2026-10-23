@@ -307,6 +307,13 @@ function construirInstruccionSistema(vacante, plan, nombreCandidato) {
     "problema bajo presión.\n" +
     `${MARCA_PREGUNTA_INICIO}Cuéntame de una vez en la que tuviste que resolver un problema bajo ` +
     `presión.${MARCA_PREGUNTA_FIN}"\n` +
+    "Esto aplica también en tu primer mensaje, el de bienvenida: el saludo y la bienvenida quedan " +
+    "FUERA de las marcas, solo la pregunta de presentación va adentro. Ejemplo de ese primer " +
+    'mensaje completo:\n' +
+    '"Hola, Miguel. Qué gusto saludarte. Antes de entrar en materia, cuéntame brevemente quién ' +
+    "eres, tu trayectoria y qué te trae a postularte a esta vacante.\n" +
+    `${MARCA_PREGUNTA_INICIO}Cuéntame brevemente quién eres, tu trayectoria y qué te trae a ` +
+    `postularte a esta vacante.${MARCA_PREGUNTA_FIN}"\n` +
     "Si tu mensaje no incluye ninguna pregunta nueva (por ejemplo, el cierre de la entrevista), no " +
     "agregues este bloque.";
 
