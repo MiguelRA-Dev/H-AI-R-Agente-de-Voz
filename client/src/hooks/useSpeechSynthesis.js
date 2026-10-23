@@ -15,7 +15,13 @@ function hablarConNavegador(text, lang, onEnd) {
  * configurado o la llamada falla, cae de vuelta a la voz nativa del
  * navegador para que la entrevista nunca se quede muda.
  */
-export function useSpeechSynthesis({ lang }) {
+// idioma/lang se reciben POR LLAMADA (en `speak(texto, { idioma, lang })`), no
+// como parámetros del hook: si se leyeran del estado del componente en el
+// momento de crear este hook, la primerísima llamada a speak() — la del
+// saludo de apertura, justo después de un setIdioma() que todavía no se
+// aplicó — se quedaría con el idioma viejo (closure obsoleto de React). Acá
+// no hay ese riesgo: cada llamada decide su propio idioma explícitamente.
+export function useSpeechSynthesis() {
   const reproduccionRef = useRef(null);
 
   const detenerAudio = useCallback(() => {
@@ -28,7 +34,7 @@ export function useSpeechSynthesis({ lang }) {
   }, []);
 
   const speak = useCallback(
-    async (text, { onEnd } = {}) => {
+    async (text, { onEnd, idioma, lang } = {}) => {
       detenerAudio();
       window.speechSynthesis.cancel();
 
@@ -36,7 +42,7 @@ export function useSpeechSynthesis({ lang }) {
         const res = await fetch("/api/tts", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
+          body: JSON.stringify({ text, idioma }),
         });
         if (!res.ok) throw new Error("TTS de Cartesia no disponible");
 
@@ -58,7 +64,7 @@ export function useSpeechSynthesis({ lang }) {
         hablarConNavegador(text, lang, onEnd);
       }
     },
-    [lang, detenerAudio]
+    [detenerAudio]
   );
 
   const cancel = useCallback(() => {

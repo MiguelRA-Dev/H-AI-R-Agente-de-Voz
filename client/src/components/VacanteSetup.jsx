@@ -18,11 +18,13 @@ function lineasDeRequisitos(requisitos) {
 
 // Reemplaza el viejo campo de texto libre: las vacantes vienen del dashboard
 // de RRHH (colección "vacantes" en Mongo), el candidato solo elige una.
-export default function VacanteSetup({ onStart, starting, error }) {
+export default function VacanteSetup({ empresaSlug, onStart, starting, error }) {
   const [vacantes, setVacantes] = useState([]);
+  const [organizacion, setOrganizacion] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
+  const [nombreCompleto, setNombreCompleto] = useState("");
   const [cedula, setCedula] = useState("");
   const [celular, setCelular] = useState("");
   const [aceptaAviso, setAceptaAviso] = useState(false);
@@ -31,12 +33,13 @@ export default function VacanteSetup({ onStart, starting, error }) {
   useEffect(() => {
     let cancelado = false;
 
-    fetch("/api/vacantes")
+    fetch(`/api/vacantes?empresa=${encodeURIComponent(empresaSlug)}`)
       .then((res) => res.json())
       .then((data) => {
         if (cancelado) return;
         if (data.error) throw new Error(data.error);
         setVacantes(data.vacantes || []);
+        setOrganizacion(data.organizacion || null);
       })
       .catch(() => {
         if (!cancelado) setLoadError("No se pudieron cargar las vacantes disponibles.");
@@ -48,15 +51,18 @@ export default function VacanteSetup({ onStart, starting, error }) {
     return () => {
       cancelado = true;
     };
-  }, []);
+  }, [empresaSlug]);
 
+  const nombreValido = nombreCompleto.trim().length > 0;
   const cedulaValida = cedula.trim().length > 0;
   const celularValido = celular.trim().length > 0;
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!selectedId || !cedulaValida || !celularValido || !aceptaAviso || starting) return;
-    onStart(selectedId, aceptaAviso, cedula.trim(), celular.trim());
+    if (!selectedId || !nombreValido || !cedulaValida || !celularValido || !aceptaAviso || starting) {
+      return;
+    }
+    onStart(selectedId, aceptaAviso, cedula.trim(), celular.trim(), nombreCompleto.trim());
   };
 
   // Clic en la ya seleccionada = deseleccionarla (se contrae de vuelta).
@@ -67,6 +73,12 @@ export default function VacanteSetup({ onStart, starting, error }) {
   return (
     <div className="setup-screen">
       <div className="setup-card setup-card--vacantes">
+        {organizacion?.nombre && (
+          <div className="empresa-brand">
+            {organizacion.logoUrl && <img src={organizacion.logoUrl} alt="" />}
+            <span>{organizacion.nombre}</span>
+          </div>
+        )}
         <h1 className="vacante-heading">Elige la vacante a la que te vas a postular</h1>
 
         <form onSubmit={handleSubmit}>
@@ -99,7 +111,7 @@ export default function VacanteSetup({ onStart, starting, error }) {
                       </span>
                     </div>
 
-                    {(v.ubicacion || v.modalidad) && (
+                    {(v.ubicacion || v.modalidad || v.idioma === "en") && (
                       <div className="vacante-card-meta">
                         {v.ubicacion && (
                           <span className="vacante-pill">
@@ -111,6 +123,9 @@ export default function VacanteSetup({ onStart, starting, error }) {
                           <span className="vacante-pill">
                             {MODALIDAD_LABEL[v.modalidad] || v.modalidad}
                           </span>
+                        )}
+                        {v.idioma === "en" && (
+                          <span className="vacante-pill">Entrevista en inglés</span>
                         )}
                       </div>
                     )}
@@ -138,6 +153,19 @@ export default function VacanteSetup({ onStart, starting, error }) {
               })}
             </div>
           )}
+
+          <div className="contacto-fields">
+            <div className="contacto-field">
+              <label htmlFor="nombreCompleto">Nombre completo</label>
+              <input
+                id="nombreCompleto"
+                type="text"
+                placeholder="Ej: Juan Pérez Gómez"
+                value={nombreCompleto}
+                onChange={(e) => setNombreCompleto(e.target.value)}
+              />
+            </div>
+          </div>
 
           <div className="contacto-fields">
             <div className="contacto-field">
@@ -206,7 +234,14 @@ export default function VacanteSetup({ onStart, starting, error }) {
           <button
             type="submit"
             className="primary"
-            disabled={starting || !selectedId || !cedulaValida || !celularValido || !aceptaAviso}
+            disabled={
+              starting ||
+              !selectedId ||
+              !nombreValido ||
+              !cedulaValida ||
+              !celularValido ||
+              !aceptaAviso
+            }
           >
             {starting ? "Preparando la entrevista…" : "Comenzar entrevista"}
           </button>
