@@ -51,7 +51,48 @@ describe("sintetizarVoz", () => {
 
     expect(opciones.body).toContain("Hola, bienvenido a la entrevista.");
     expect(opciones.body).toContain("<speak");
-    expect(opciones.body).toContain("es-CO");
+    expect(opciones.body).toContain("es-MX");
+  });
+
+  test("usa un estilo de habla expresivo en inglés (Andrew sí lo soporta)", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1]).buffer,
+    });
+
+    await sintetizarVoz("Tell me a bit about yourself.", "en");
+
+    const [, opciones] = global.fetch.mock.calls[0];
+    expect(opciones.body).toContain('xmlns:mstts="https://www.w3.org/2001/mstts"');
+    expect(opciones.body).toContain("<mstts:express-as");
+    expect(opciones.body).toContain('style="empathetic"');
+  });
+
+  test("en español no manda express-as — Ava no soporta ningún estilo", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1]).buffer,
+    });
+
+    await sintetizarVoz("Cuéntame un poco sobre ti.", "es");
+
+    const [, opciones] = global.fetch.mock.calls[0];
+    expect(opciones.body).not.toContain("<mstts:express-as");
+  });
+
+  test("inserta una pausa después de cada fin de oración, nunca al final del texto", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1]).buffer,
+    });
+
+    await sintetizarVoz("Qué bueno saludarte. Empecemos con la primera pregunta.");
+
+    const [, opciones] = global.fetch.mock.calls[0];
+    // Una sola pausa: entre las dos oraciones, no una colgando al final
+    // (el texto tiene 2 oraciones pero solo 1 punto seguido de espacio).
+    expect(opciones.body.match(/<break time="320ms"\/>/g)).toHaveLength(1);
+    expect(opciones.body).toContain('saludarte.<break time="320ms"/> Empecemos');
   });
 
   test("escapa caracteres reservados de XML en el texto", async () => {
@@ -76,6 +117,19 @@ describe("sintetizarVoz", () => {
     expect(resultado.contentType).toBe("audio/mpeg");
     expect(Buffer.isBuffer(resultado.audio)).toBe(true);
     expect([...resultado.audio]).toEqual([9, 9, 9]);
+  });
+
+  test("con idioma 'en' usa la voz y el locale en inglés, no el de español", async () => {
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      arrayBuffer: async () => new Uint8Array([1]).buffer,
+    });
+
+    await sintetizarVoz("Hello, welcome to the interview.", "en");
+
+    const [, opciones] = global.fetch.mock.calls[0];
+    expect(opciones.body).toContain("en-US");
+    expect(opciones.body).not.toContain("es-CO");
   });
 
   test("lanza un error legible si Azure Speech responde con un status de error", async () => {

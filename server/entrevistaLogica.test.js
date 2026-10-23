@@ -2,10 +2,13 @@ import { describe, test, expect } from "@jest/globals";
 import {
   MARGEN_TURNOS_EXTRA,
   UMBRAL_APROBACION,
+  MARCA_PREGUNTA_INICIO,
+  MARCA_PREGUNTA_FIN,
   debeForzarCierre,
   esUltimaPreguntaPlaneada,
   construirMensajeConNota,
   extraerCierre,
+  extraerPregunta,
   calcularAprobado,
   construirAlertas,
   calcularPuntajeGlobal,
@@ -73,6 +76,50 @@ describe("extraerCierre", () => {
     const resultado = extraerCierre(`Antes ${MARCA} después`, MARCA);
     expect(resultado.finalizada).toBe(true);
     expect(resultado.texto).toBe("Antes  después");
+  });
+});
+
+describe("extraerPregunta", () => {
+  test("extrae la pregunta del bloque final y lo quita por completo del texto hablado", () => {
+    const texto =
+      "Qué interesante tu experiencia ahí. Cuéntame de una vez en la que tuviste que resolver un " +
+      "problema bajo presión.\n" +
+      `${MARCA_PREGUNTA_INICIO}Cuéntame de una vez en la que tuviste que resolver un problema bajo ` +
+      `presión.${MARCA_PREGUNTA_FIN}`;
+    const resultado = extraerPregunta(texto, MARCA_PREGUNTA_INICIO, MARCA_PREGUNTA_FIN);
+    expect(resultado.pregunta).toBe("Cuéntame de una vez en la que tuviste que resolver un problema bajo presión.");
+    expect(resultado.texto).toBe(
+      "Qué interesante tu experiencia ahí. Cuéntame de una vez en la que tuviste que resolver un problema bajo presión."
+    );
+    expect(resultado.texto).not.toContain(MARCA_PREGUNTA_INICIO);
+    expect(resultado.texto).not.toContain(MARCA_PREGUNTA_FIN);
+  });
+
+  test("pregunta vacía y texto intacto si el modelo no agregó el bloque (ej. el cierre)", () => {
+    const resultado = extraerPregunta(
+      "Gracias por tu tiempo y por tus respuestas.",
+      MARCA_PREGUNTA_INICIO,
+      MARCA_PREGUNTA_FIN
+    );
+    expect(resultado).toEqual({ texto: "Gracias por tu tiempo y por tus respuestas.", pregunta: "" });
+  });
+
+  test("si se truncó a mitad del bloque, corta ahí y no deja la marca de apertura filtrándose", () => {
+    const resultado = extraerPregunta(
+      `Respuesta normal. ${MARCA_PREGUNTA_INICIO}pregunta que se corta a la mitad`,
+      MARCA_PREGUNTA_INICIO,
+      MARCA_PREGUNTA_FIN
+    );
+    expect(resultado).toEqual({ texto: "Respuesta normal.", pregunta: "" });
+  });
+
+  test("pregunta vacía si las marcas están en el orden equivocado", () => {
+    const resultado = extraerPregunta(
+      `${MARCA_PREGUNTA_FIN} al revés ${MARCA_PREGUNTA_INICIO}`,
+      MARCA_PREGUNTA_INICIO,
+      MARCA_PREGUNTA_FIN
+    );
+    expect(resultado.pregunta).toBe("");
   });
 });
 

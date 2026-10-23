@@ -13,10 +13,11 @@ function getClient() {
   return clientPromise;
 }
 
-// Guarda un registro de entrevista y devuelve el _id insertado. Si viene
-// vacanteId (string), se guarda como ObjectId real: es el mismo tipo que usa
-// el dashboard de RRHH cuando vincula una entrevista a mano, así el vínculo
-// automático y el manual son indistinguibles para sus filtros/stats.
+// Guarda un registro de entrevista y devuelve el _id insertado. Si vienen
+// vacanteId/organizacionId (string), se guardan como ObjectId real: es el
+// mismo tipo que usa el dashboard de RRHH al filtrar/vincular, así el
+// dashboard encuentra estas entrevistas con un query normal, no uno aparte
+// que distinga string de ObjectId.
 export async function guardarEntrevista(registro) {
   const client = await getClient();
   const db = client.db("agente_voz");
@@ -24,6 +25,9 @@ export async function guardarEntrevista(registro) {
   const documento = { ...registro, creadoEn: new Date() };
   if (documento.vacanteId) {
     documento.vacanteId = new ObjectId(documento.vacanteId);
+  }
+  if (documento.organizacionId) {
+    documento.organizacionId = new ObjectId(documento.organizacionId);
   }
   const resultado = await coleccion.insertOne(documento);
   return resultado.insertedId;
@@ -39,16 +43,34 @@ const PROYECCION_TARJETA = {
   modalidad: 1,
   tipoContrato: 1,
   requisitos: 1,
+  idioma: 1,
 };
 
+// Resuelve el slug de la URL que comparte cada empresa (ej. "/e/ingeurbe")
+// a su organización real — es lo que le dice al resto de estas funciones de
+// qué empresa traer las vacantes, para que un candidato en el link de una
+// empresa nunca vea ni pueda tocar las vacantes de otra.
+export async function obtenerOrganizacionPorSlug(slug) {
+  const client = await getClient();
+  const db = client.db("agente_voz");
+  const organizacion = await db.collection("organizaciones").findOne({ slug });
+  if (!organizacion) return null;
+  const { _id, ...resto } = organizacion;
+  return { id: _id.toString(), ...resto };
+}
+
 // Lista las vacantes que RRHH dejó publicadas (dashboard del otro
-// microservicio, colección compartida "vacantes" en esta misma base).
-export async function obtenerVacantesPublicadas() {
+// microservicio, colección compartida "vacantes" en esta misma base),
+// filtradas a la organización del link que el candidato abrió.
+export async function obtenerVacantesPublicadas(organizacionId) {
   const client = await getClient();
   const db = client.db("agente_voz");
   const vacantes = await db
     .collection("vacantes")
-    .find({ estado: "abierta" }, { projection: PROYECCION_TARJETA })
+    .find(
+      { estado: "abierta", organizacionId: new ObjectId(organizacionId) },
+      { projection: PROYECCION_TARJETA }
+    )
     .sort({ creadoEn: -1 })
     .toArray();
 
@@ -56,15 +78,17 @@ export async function obtenerVacantesPublicadas() {
 }
 
 // Trae el documento completo de una vacante publicada para armar el plan de
-// entrevista y el systemInstruction del chat.
-export async function obtenerVacantePorId(id) {
-  if (!ObjectId.isValid(id)) return null;
+// entrevista y el systemInstruction del chat. organizacionId es obligatorio
+// y va en el filtro: sin esto, alguien con el link de la empresa A podría
+// pasar el id de una vacante de la empresa B y arrancar una entrevista ahí.
+export async function obtenerVacantePorId(id, organizacionId) {
+  if (!ObjectId.isValid(id) || !ObjectId.isValid(organizacionId)) return null;
 
   const client = await getClient();
   const db = client.db("agente_voz");
   const vacante = await db
     .collection("vacantes")
-    .findOne({ _id: new ObjectId(id), estado: "abierta" });
+    .findOne({ _id: new ObjectId(id), estado: "abierta", organizacionId: new ObjectId(organizacionId) });
 
   if (!vacante) return null;
   const { _id, ...resto } = vacante;

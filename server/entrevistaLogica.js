@@ -5,6 +5,11 @@
 
 export const MARGEN_TURNOS_EXTRA = 3;
 
+// Marcas con las que el modelo envuelve, dentro de su respuesta, la pregunta
+// puntual que le está haciendo al candidato (ver extraerPregunta más abajo).
+export const MARCA_PREGUNTA_INICIO = "[PREGUNTA]";
+export const MARCA_PREGUNTA_FIN = "[/PREGUNTA]";
+
 // Si el modelo no cerró solo tras el margen de seguridad, el servidor cierra
 // él mismo sin volver a llamarlo.
 export function debeForzarCierre(turnoSiguiente, totalPreguntas, margen = MARGEN_TURNOS_EXTRA) {
@@ -30,6 +35,31 @@ export function extraerCierre(texto, marcaFin) {
   const finalizada = texto.includes(marcaFin);
   const textoLimpio = finalizada ? texto.replace(marcaFin, "").trim() : texto;
   return { texto: textoLimpio, finalizada };
+}
+
+// El modelo repite, en un bloque aparte al final de su respuesta hablada
+// (ver instruccionPregunta en gemini.js), la pregunta puntual que le acaba
+// de hacer al candidato — para poder mostrarla sola debajo del orb, sin el
+// saludo/transición que la rodea en el mensaje natural, que es justo lo que
+// se veía mal en pantalla. Ese bloque es una COPIA para pantalla, nunca algo
+// que se deba oír dos veces: se quita por completo del texto que se habla
+// (no solo las marcas). "pregunta" es "" si el modelo no agregó el bloque
+// (ej. el cierre de la entrevista, o si se truncó a mitad del bloque por
+// maxOutputTokens) — el cliente cae de vuelta al texto completo en ese caso.
+export function extraerPregunta(texto, marcaInicio, marcaFin) {
+  const i = texto.indexOf(marcaInicio);
+  if (i === -1) return { texto: texto.trim(), pregunta: "" };
+
+  const f = texto.indexOf(marcaFin, i);
+  if (f === -1) {
+    // Truncado a mitad del bloque: mejor perder la pregunta de pantalla que
+    // dejar la marca de apertura sin cerrar filtrándose al texto hablado.
+    return { texto: texto.slice(0, i).trim(), pregunta: "" };
+  }
+
+  const pregunta = texto.slice(i + marcaInicio.length, f).trim();
+  const textoLimpio = (texto.slice(0, i) + texto.slice(f + marcaFin.length)).trim();
+  return { texto: textoLimpio, pregunta };
 }
 
 // Puntaje siempre en escala fija de 0 a 100 (ver EVALUACION_SCHEMA en gemini.js).

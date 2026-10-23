@@ -34,4 +34,15 @@ describe("normalizarPlan", () => {
     const { preguntas } = normalizarPlan(preguntasDePrueba(3));
     expect(preguntas.slice(1)).toEqual(preguntasDePrueba(3));
   });
+
+  test("con idioma 'en' antepone la intro en inglés, no la de español", () => {
+    const { preguntas } = normalizarPlan(preguntasDePrueba(3), "en");
+    expect(preguntas[0]).not.toBe(PREGUNTA_INTRO);
+    expect(preguntas[0].tema).toBe("Personal introduction");
+  });
+
+  test("un idioma desconocido cae de vuelta a la intro en español", () => {
+    const { preguntas } = normalizarPlan(preguntasDePrueba(3), "fr");
+    expect(preguntas[0]).toBe(PREGUNTA_INTRO);
+  });
 });

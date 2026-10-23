@@ -1,4 +1,5 @@
 import express from "express";
+import { rateLimit } from "express-rate-limit";
 import dotenv from "dotenv";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,9 +9,11 @@ import {
   generarPlanEntrevista,
   crearChatEntrevista,
   evaluarEntrevista,
+  enviarMensaje,
 } from "./gemini.js";
 import {
   guardarEntrevista,
+  obtenerOrganizacionPorSlug,
   obtenerVacantesPublicadas,
   obtenerVacantePorId,
   guardarSesion,
@@ -24,7 +27,10 @@ import {
   debeForzarCierre,
   construirMensajeConNota,
   extraerCierre,
+  extraerPregunta,
   construirAlertas,
+  MARCA_PREGUNTA_INICIO,
+  MARCA_PREGUNTA_FIN,
 } from "./entrevistaLogica.js";
 import { ttsDisponible, sintetizarVoz } from "./tts.js";
 
@@ -58,7 +64,36 @@ if (!ttsDisponible()) {
   );
 }
 const app = express();
+// Confía en el primer salto de proxy (Render/Railway/etc. ponen la app detrás
+// de exactamente uno) para que `req.ip` sea la IP real del candidato — sin
+// esto, todo el tráfico se ve como una sola IP (el proxy) y el rate limiting
+// de abajo no sirve de nada.
+app.set("trust proxy", 1);
 app.use(express.json());
+
+// Límites generosos a propósito: varios candidatos de la misma empresa
+// entrevistando a la vez suelen compartir la IP pública de su oficina, y no
+// deben chocar entre ellos. El objetivo es frenar un script automatizado
+// (cientos/miles de peticiones por minuto), no a un grupo de gente real
+// usando el producto al mismo tiempo.
+function limitador(opciones) {
+  return rateLimit({
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: "Demasiadas solicitudes. Espera un momento y vuelve a intentar." },
+    ...opciones,
+  });
+}
+
+// Arrancar una entrevista es lo más caro por petición (genera el plan completo
+// con Gemini) — el límite más estricto de los cuatro.
+const limiteSession = limitador({ windowMs: 15 * 60 * 1000, limit: 30 });
+// Cada turno de la conversación llama a Gemini; una entrevista real hace como
+// máximo ~24 turnos en 15-20 minutos, así que hay margen de sobra para varias
+// entrevistas concurrentes de la misma IP.
+const limiteMessage = limitador({ windowMs: 10 * 60 * 1000, limit: 200 });
+const limiteTts = limitador({ windowMs: 10 * 60 * 1000, limit: 250 });
+const limiteVacantes = limitador({ windowMs: 10 * 60 * 1000, limit: 100 });
 
 // En producción (después de `npm run build` en /client) esto sirve la app de
 // React ya compilada. En desarrollo Vite corre aparte y le hace proxy a /api.
@@ -111,7 +146,8 @@ async function obtenerSesionActiva(sessionId) {
   const chat = crearChatEntrevista(
     guardada.vacanteInfo,
     guardada.plan,
-    construirHistorialGemini(guardada.mensajes)
+    construirHistorialGemini(guardada.mensajes),
+    guardada.nombreCompleto
   );
 
   const session = { ...guardada, chat };
@@ -123,12 +159,37 @@ async function obtenerSesionActiva(sessionId) {
   return session;
 }
 
+// Resuelve el slug de empresa que manda el cliente (ver App.jsx, lee "/e/:slug"
+// de la URL) a su organización real. Centralizado acá porque lo necesitan
+// tanto /api/vacantes como /api/session, con el mismo mensaje de error si el
+// link está mal escrito o la empresa no existe.
+async function resolverOrganizacion(slug, res) {
+  const limpio = (slug || "").trim();
+  if (!limpio) {
+    res.status(400).json({ error: "Falta el enlace de la empresa." });
+    return null;
+  }
+  const organizacion = await obtenerOrganizacionPorSlug(limpio);
+  if (!organizacion) {
+    res.status(404).json({ error: "No encontramos la empresa de este enlace." });
+    return null;
+  }
+  return organizacion;
+}
+
 // Lista las vacantes que RRHH dejó publicadas en su dashboard, para que el
-// candidato elija una en vez de escribir el puesto a mano.
-app.get("/api/vacantes", async (req, res) => {
+// candidato elija una en vez de escribir el puesto a mano. Solo las de la
+// empresa cuyo link abrió el candidato (?empresa=slug).
+app.get("/api/vacantes", limiteVacantes, async (req, res) => {
+  const organizacion = await resolverOrganizacion(req.query.empresa, res);
+  if (!organizacion) return;
+
   try {
-    const vacantes = await obtenerVacantesPublicadas();
-    res.json({ vacantes });
+    const vacantes = await obtenerVacantesPublicadas(organizacion.id);
+    res.json({
+      vacantes,
+      organizacion: { nombre: organizacion.nombre, logoUrl: organizacion.logoUrl || null },
+    });
   } catch (err) {
     console.error("Error obteniendo las vacantes publicadas:", err);
     res
@@ -140,18 +201,26 @@ app.get("/api/vacantes", async (req, res) => {
 // Crea la sesión: busca la vacante elegida, genera el plan de preguntas a partir
 // de su descripción/requisitos reales, arma el chat con el entrevistador ya
 // perfilado, y hace que la IA abra la conversación ella misma.
-app.post("/api/session", async (req, res) => {
+app.post("/api/session", limiteSession, async (req, res) => {
   const vacanteId = (req.body?.vacanteId || "").trim();
+  const nombreCompleto = (req.body?.nombreCompleto || "").trim();
   const cedula = (req.body?.cedula || "").trim();
   const celular = (req.body?.celular || "").trim();
+
+  const organizacion = await resolverOrganizacion(req.body?.empresaSlug, res);
+  if (!organizacion) return;
+
   if (!vacanteId) {
     return res.status(400).json({ error: "Falta seleccionar una vacante." });
   }
-  // Cédula y celular se piden acá, escritos a mano, en vez de que la IA los pida
-  // por voz: son datos donde un error de transcripción pesa mucho más que en
-  // una respuesta de texto libre.
-  if (!cedula || !celular) {
-    return res.status(400).json({ error: "Falta la cédula o el número de celular." });
+  // Nombre, cédula y celular se piden acá, escritos a mano, en vez de que la IA
+  // los pida por voz: son datos donde un error de transcripción pesa mucho más
+  // que en una respuesta de texto libre (el nombre ya daba varios errores de
+  // validación cuando se lo pedíamos hablado).
+  if (!nombreCompleto || !cedula || !celular) {
+    return res
+      .status(400)
+      .json({ error: "Falta el nombre completo, la cédula o el número de celular." });
   }
   // Exigido también del lado del servidor (no solo deshabilitando el botón en
   // el cliente): sin esto no hay consentimiento válido para tratar cédula,
@@ -163,25 +232,38 @@ app.post("/api/session", async (req, res) => {
   }
 
   try {
-    const vacante = await obtenerVacantePorId(vacanteId);
+    // organizacion.id va en el filtro, no solo el vacanteId: sin esto, alguien
+    // con el link de una empresa podría pasar el id de la vacante de otra
+    // empresa y arrancar una entrevista ahí.
+    const vacante = await obtenerVacantePorId(vacanteId, organizacion.id);
     if (!vacante) {
       return res.status(404).json({ error: "La vacante seleccionada ya no está disponible." });
     }
 
     const plan = await generarPlanEntrevista(vacante);
-    const chat = crearChatEntrevista(vacante, plan);
-    const apertura = await chat.sendMessage({ message: MENSAJE_ARRANQUE });
+    const chat = crearChatEntrevista(vacante, plan, [], nombreCompleto);
+    const aperturaCruda = await enviarMensaje(chat, { message: MENSAJE_ARRANQUE });
+    // "pregunta" es solo lo que el modelo marcó como la pregunta puntual (ver
+    // instruccionPregunta en gemini.js), para mostrarla aparte del saludo —
+    // "texto" sigue siendo el mensaje completo, el que de verdad se habla.
+    const { texto: aperturaTexto, pregunta: aperturaPregunta } = extraerPregunta(
+      aperturaCruda.text,
+      MARCA_PREGUNTA_INICIO,
+      MARCA_PREGUNTA_FIN
+    );
 
     const sessionId = randomUUID();
     const session = {
+      organizacionId: organizacion.id,
       vacante: vacante.titulo,
       vacanteId: vacante.id,
       vacanteInfo: vacante,
+      nombreCompleto,
       cedula,
       celular,
       chat,
       plan,
-      mensajes: [{ role: "ai", text: apertura.text }],
+      mensajes: [{ role: "ai", text: aperturaTexto }],
       turnos: 0,
       finalizada: false,
       avisoPrivacidadAceptadoEn: new Date(),
@@ -194,9 +276,11 @@ app.post("/api/session", async (req, res) => {
 
     res.json({
       sessionId,
-      openingText: apertura.text,
+      openingText: aperturaTexto,
+      preguntaTexto: aperturaPregunta,
       vacante: vacante.titulo,
       totalPreguntas: plan.totalPreguntas,
+      idioma: vacante.idioma === "en" ? "en" : "es",
     });
   } catch (err) {
     console.error("Error creando la sesión de entrevista:", err);
@@ -208,7 +292,7 @@ app.post("/api/session", async (req, res) => {
 
 // Envía la respuesta hablada (ya transcrita) del candidato y devuelve la siguiente
 // pregunta o, si el modelo decidió cerrar, el mensaje de despedida.
-app.post("/api/message", async (req, res) => {
+app.post("/api/message", limiteMessage, async (req, res) => {
   const { sessionId, message, cambiosPantalla } = req.body || {};
 
   if (!message || !message.trim()) {
@@ -266,8 +350,13 @@ app.post("/api/message", async (req, res) => {
   const mensajeAEnviar = construirMensajeConNota(message, turnoSiguiente, session.plan.totalPreguntas);
 
   try {
-    const respuesta = await session.chat.sendMessage({ message: mensajeAEnviar });
-    const { texto, finalizada } = extraerCierre(respuesta.text, MARCA_FIN);
+    const respuesta = await enviarMensaje(session.chat, { message: mensajeAEnviar });
+    const { texto: textoSinMarcaPregunta, pregunta } = extraerPregunta(
+      respuesta.text,
+      MARCA_PREGUNTA_INICIO,
+      MARCA_PREGUNTA_FIN
+    );
+    const { texto, finalizada } = extraerCierre(textoSinMarcaPregunta, MARCA_FIN);
 
     if (finalizada) {
       session.finalizada = true;
@@ -279,6 +368,7 @@ app.post("/api/message", async (req, res) => {
 
     res.json({
       text: texto,
+      preguntaTexto: pregunta,
       finalizada,
       progreso: { actual: session.turnos, total: session.plan.totalPreguntas },
     });
@@ -302,8 +392,8 @@ app.post("/api/message", async (req, res) => {
 
 // Convierte el texto del entrevistador a voz natural. El cliente cae de vuelta
 // al TTS del navegador si esto falla o si no hay credenciales de Azure Speech.
-app.post("/api/tts", async (req, res) => {
-  const { text } = req.body || {};
+app.post("/api/tts", limiteTts, async (req, res) => {
+  const { text, idioma } = req.body || {};
   if (!text || !text.trim()) {
     return res.status(400).json({ error: "Falta el texto a sintetizar." });
   }
@@ -312,7 +402,7 @@ app.post("/api/tts", async (req, res) => {
   }
 
   try {
-    const { audio, contentType } = await sintetizarVoz(text);
+    const { audio, contentType } = await sintetizarVoz(text, idioma === "en" ? "en" : "es");
     res.set("Content-Type", contentType);
     res.send(audio);
     registrarUsoTts(text.length).catch((err) =>
@@ -355,9 +445,12 @@ async function finalizarYGuardar(sessionId, session) {
     evaluacion.justificacionUsoIA
   );
   const id = await guardarEntrevista({
+    organizacionId: session.organizacionId,
     vacante: session.vacante,
     vacanteId: session.vacanteId,
-    candidato: evaluacion.nombreCandidato,
+    // Del formulario, no de lo que la IA haya entendido por voz — es la fuente
+    // de verdad del nombre, igual que cédula y celular.
+    candidato: session.nombreCompleto,
     cedula: session.cedula,
     celular: session.celular,
     avisoPrivacidadAceptadoEn: session.avisoPrivacidadAceptadoEn,
@@ -382,6 +475,14 @@ async function finalizarYGuardar(sessionId, session) {
     console.error("Error borrando la sesión ya finalizada:", err)
   );
 }
+
+// El cliente no tiene router: lee el slug de la empresa directo de
+// window.location.pathname (ver App.jsx, patrón "/e/:slug"). express.static
+// de arriba solo sirve archivos reales (JS/CSS/etc.) — sin esto, pedir esa
+// ruta directo (no navegando desde "/") daría 404 en vez de cargar la app.
+app.get(/^(?!\/api\/).*/, (req, res) => {
+  res.sendFile(path.join(__dirname, "../client/dist/index.html"));
+});
 
 const PORT = process.env.PORT || 3000;
 

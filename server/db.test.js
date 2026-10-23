@@ -41,6 +41,7 @@ jest.unstable_mockModule("mongodb", () => ({
 }));
 
 let guardarEntrevista;
+let obtenerOrganizacionPorSlug;
 let obtenerVacantesPublicadas;
 let obtenerVacantePorId;
 let guardarSesion;
@@ -68,6 +69,7 @@ beforeEach(async () => {
 
   ({
     guardarEntrevista,
+    obtenerOrganizacionPorSlug,
     obtenerVacantesPublicadas,
     obtenerVacantePorId,
     guardarSesion,
@@ -123,16 +125,62 @@ describe("guardarEntrevista", () => {
     const documentoGuardado = insertOneMock.mock.calls[0][0];
     expect(documentoGuardado.vacanteId).toBeUndefined();
   });
+
+  test("convierte organizacionId (string) a ObjectId antes de guardar", async () => {
+    await guardarEntrevista({ vacante: "QA Tester", organizacionId: "507f1f77bcf86cd799439011" });
+
+    const documentoGuardado = insertOneMock.mock.calls[0][0];
+    expect(documentoGuardado.organizacionId).toBeInstanceOf(ObjectIdMock);
+    expect(documentoGuardado.organizacionId.toString()).toBe("507f1f77bcf86cd799439011");
+  });
+});
+
+describe("obtenerOrganizacionPorSlug", () => {
+  test("busca por slug en la colección 'organizaciones'", async () => {
+    findOneMock.mockResolvedValue(null);
+    await obtenerOrganizacionPorSlug("ingeurbe");
+
+    expect(dbMock).toHaveBeenCalledWith("agente_voz");
+    expect(collectionMock).toHaveBeenCalledWith("organizaciones");
+    expect(findOneMock).toHaveBeenCalledWith({ slug: "ingeurbe" });
+  });
+
+  test("devuelve null si no existe una organización con ese slug", async () => {
+    findOneMock.mockResolvedValue(null);
+    const organizacion = await obtenerOrganizacionPorSlug("no-existe");
+    expect(organizacion).toBeNull();
+  });
+
+  test("mapea _id a id (string) y conserva el resto de los campos", async () => {
+    findOneMock.mockResolvedValue({
+      _id: new ObjectIdMock("abc123"),
+      nombre: "Ingeurbe",
+      slug: "ingeurbe",
+      licencias: { admin: 1, reclutador: 3 },
+    });
+
+    const organizacion = await obtenerOrganizacionPorSlug("ingeurbe");
+
+    expect(organizacion).toEqual({
+      id: "abc123",
+      nombre: "Ingeurbe",
+      slug: "ingeurbe",
+      licencias: { admin: 1, reclutador: 3 },
+    });
+  });
 });
 
 describe("obtenerVacantesPublicadas", () => {
-  test("consulta la colección 'vacantes' filtrando por estado 'abierta'", async () => {
+  test("consulta la colección 'vacantes' filtrando por estado 'abierta' y la organización", async () => {
     toArrayMock.mockResolvedValue([]);
-    await obtenerVacantesPublicadas();
+    await obtenerVacantesPublicadas("507f1f77bcf86cd799439011");
 
     expect(dbMock).toHaveBeenCalledWith("agente_voz");
     expect(collectionMock).toHaveBeenCalledWith("vacantes");
-    expect(findMock).toHaveBeenCalledWith({ estado: "abierta" }, expect.any(Object));
+    const filtro = findMock.mock.calls[0][0];
+    expect(filtro.estado).toBe("abierta");
+    expect(filtro.organizacionId).toBeInstanceOf(ObjectIdMock);
+    expect(filtro.organizacionId.toString()).toBe("507f1f77bcf86cd799439011");
   });
 
   test("mapea _id a id (string) y conserva el resto de los campos", async () => {
@@ -140,7 +188,7 @@ describe("obtenerVacantesPublicadas", () => {
       { _id: new ObjectIdMock("abc123"), titulo: "Ingeniero de Sistemas", ubicacion: "Bogota" },
     ]);
 
-    const vacantes = await obtenerVacantesPublicadas();
+    const vacantes = await obtenerVacantesPublicadas("507f1f77bcf86cd799439011");
 
     expect(vacantes).toEqual([
       { id: "abc123", titulo: "Ingeniero de Sistemas", ubicacion: "Bogota" },
@@ -149,18 +197,36 @@ describe("obtenerVacantesPublicadas", () => {
 });
 
 describe("obtenerVacantePorId", () => {
+  const ORG_ID = "507f1f77bcf86cd799439011";
+
   test("devuelve null si el id no es un ObjectId válido, sin llegar a consultar Mongo", async () => {
-    const vacante = await obtenerVacantePorId("no-es-un-id-valido");
+    const vacante = await obtenerVacantePorId("no-es-un-id-valido", ORG_ID);
 
     expect(vacante).toBeNull();
     expect(findOneMock).not.toHaveBeenCalled();
   });
 
-  test("devuelve null si no encuentra una vacante abierta con ese id", async () => {
+  test("devuelve null si organizacionId no es un ObjectId válido, sin llegar a consultar Mongo", async () => {
+    const vacante = await obtenerVacantePorId(ORG_ID, "no-es-un-id-valido");
+
+    expect(vacante).toBeNull();
+    expect(findOneMock).not.toHaveBeenCalled();
+  });
+
+  test("devuelve null si no encuentra una vacante abierta de esa organización con ese id", async () => {
     findOneMock.mockResolvedValue(null);
 
-    const vacante = await obtenerVacantePorId("507f1f77bcf86cd799439011");
+    const vacante = await obtenerVacantePorId(ORG_ID, ORG_ID);
     expect(vacante).toBeNull();
+  });
+
+  test("filtra también por organizacionId, no solo por _id y estado", async () => {
+    findOneMock.mockResolvedValue(null);
+    await obtenerVacantePorId(ORG_ID, ORG_ID);
+
+    const filtro = findOneMock.mock.calls[0][0];
+    expect(filtro.organizacionId).toBeInstanceOf(ObjectIdMock);
+    expect(filtro.organizacionId.toString()).toBe(ORG_ID);
   });
 
   test("devuelve la vacante con id (string) en vez de _id", async () => {
@@ -170,7 +236,7 @@ describe("obtenerVacantePorId", () => {
       requisitos: "2 años de experiencia",
     });
 
-    const vacante = await obtenerVacantePorId("507f1f77bcf86cd799439011");
+    const vacante = await obtenerVacantePorId("507f1f77bcf86cd799439011", ORG_ID);
 
     expect(vacante).toEqual({
       id: "507f1f77bcf86cd799439011",
